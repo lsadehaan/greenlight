@@ -1,13 +1,266 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["nativeDistinct"]
 }
 
 datasource db {
   provider = "postgresql"
+}
+
+// ── Enums ────────────────────────────────────────────────────────────────────
+
+enum SubmissionStatus {
+  pending
+  approved
+  rejected
+}
+
+enum ReviewMode {
+  human_only
+  ai_only
+  ai_then_human
+}
+
+enum PolicyAction {
+  block
+  flag
+  info
+}
+
+enum GuardrailFailureMode {
+  fail_open
+  fail_closed
+}
+
+enum ReviewerType {
+  human
+  ai
+}
+
+enum ReviewDecision {
+  approved
+  rejected
+  escalated
+}
+
+enum PolicyEvalResult {
+  pass
+  flag
+  block
+}
+
+enum GuardrailVerdict {
+  pass
+  fail
+  flag
+}
+
+enum ActorType {
+  human
+  ai
+  system
+  guardrail
+}
+
+enum FeedbackOutcome {
+  positive
+  negative
+  neutral
+}
+
+// ── Models ───────────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id          String       @id @default(uuid()) @db.Uuid
+  keyHash     String       @unique @map("key_hash")
+  name        String
+  active      Boolean      @default(true)
+  createdAt   DateTime     @default(now()) @map("created_at")
+  revokedAt   DateTime?    @map("revoked_at")
+  submissions Submission[]
+
+  @@map("api_key")
+}
+
+model Submission {
+  id             String               @id @default(uuid()) @db.Uuid
+  apiKeyId       String               @map("api_key_id") @db.Uuid
+  channel        String
+  contentType    String               @map("content_type")
+  content        Json
+  metadata       Json?
+  status         SubmissionStatus     @default(pending)
+  reviewMode     ReviewMode?          @map("review_mode")
+  callbackUrl    String?              @map("callback_url")
+  callbackStatus String?              @map("callback_status")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  decidedAt      DateTime?            @map("decided_at")
+
+  apiKey               ApiKey                @relation(fields: [apiKeyId], references: [id])
+  policyEvaluations    PolicyEvaluation[]
+  guardrailEvaluations GuardrailEvaluation[]
+  reviews              Review[]
+  feedbacks            Feedback[]
+  auditEvents          AuditEvent[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([channel])
+  @@index([apiKeyId])
+  @@map("submission")
+}
+
+model Policy {
+  id               String       @id @default(uuid()) @db.Uuid
+  name             String
+  type             String
+  config           Json
+  action           PolicyAction
+  scopeChannel     String?      @map("scope_channel")
+  scopeContentType String?      @map("scope_content_type")
+  priority         Int          @default(0)
+  active           Boolean      @default(true)
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  evaluations PolicyEvaluation[]
+
+  @@map("policy")
+}
+
+model PolicyEvaluation {
+  id           String          @id @default(uuid()) @db.Uuid
+  submissionId String          @map("submission_id") @db.Uuid
+  policyId     String          @map("policy_id") @db.Uuid
+  result       PolicyEvalResult
+  actionTaken  PolicyAction    @map("action_taken")
+  details      Json?
+  evaluatedAt  DateTime        @default(now()) @map("evaluated_at")
+
+  submission Submission @relation(fields: [submissionId], references: [id])
+  policy     Policy     @relation(fields: [policyId], references: [id])
+
+  @@index([submissionId])
+  @@index([policyId])
+  @@map("policy_evaluation")
+}
+
+model Guardrail {
+  id               String               @id @default(uuid()) @db.Uuid
+  name             String
+  endpointUrl      String               @map("endpoint_url")
+  timeoutMs        Int                  @default(10000) @map("timeout_ms")
+  failureMode      GuardrailFailureMode @map("failure_mode")
+  pipelineOrder    Int                  @map("pipeline_order")
+  scopeChannel     String?              @map("scope_channel")
+  scopeContentType String?              @map("scope_content_type")
+  active           Boolean              @default(true)
+  createdAt        DateTime             @default(now()) @map("created_at")
+
+  evaluations GuardrailEvaluation[]
+
+  @@map("guardrail")
+}
+
+model GuardrailEvaluation {
+  id           String          @id @default(uuid()) @db.Uuid
+  submissionId String          @map("submission_id") @db.Uuid
+  guardrailId  String          @map("guardrail_id") @db.Uuid
+  verdict      GuardrailVerdict
+  confidence   Float?
+  reasoning    String?
+  categories   Json?
+  latencyMs    Int?            @map("latency_ms")
+  evaluatedAt  DateTime        @default(now()) @map("evaluated_at")
+
+  submission Submission @relation(fields: [submissionId], references: [id])
+  guardrail  Guardrail  @relation(fields: [guardrailId], references: [id])
+
+  @@index([submissionId])
+  @@index([guardrailId])
+  @@map("guardrail_evaluation")
+}
+
+model Review {
+  id               String         @id @default(uuid()) @db.Uuid
+  submissionId     String         @map("submission_id") @db.Uuid
+  reviewerType     ReviewerType   @map("reviewer_type")
+  reviewerIdentity String?        @map("reviewer_identity")
+  decision         ReviewDecision
+  confidence       Float?
+  reasoning        String?
+  comment          String?
+  aiMetadata       Json?          @map("ai_metadata")
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  submission Submission @relation(fields: [submissionId], references: [id])
+
+  @@index([submissionId])
+  @@map("review")
+}
+
+model Feedback {
+  id           String          @id @default(uuid()) @db.Uuid
+  submissionId String          @map("submission_id") @db.Uuid
+  outcome      FeedbackOutcome
+  reason       String?
+  data         Json?
+  createdAt    DateTime        @default(now()) @map("created_at")
+
+  submission Submission @relation(fields: [submissionId], references: [id])
+
+  @@index([submissionId])
+  @@map("feedback")
+}
+
+model AuditEvent {
+  id           String    @id @default(uuid()) @db.Uuid
+  submissionId String?   @map("submission_id") @db.Uuid
+  eventType    String    @map("event_type")
+  payload      Json?
+  actor        String?
+  actorType    ActorType @map("actor_type")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  submission Submission? @relation(fields: [submissionId], references: [id])
+
+  @@index([submissionId])
+  @@index([createdAt])
+  @@map("audit_event")
+}
+
+model EscalationConfig {
+  id                String  @id @default(uuid()) @db.Uuid
+  slaMinutes        Int     @map("sla_minutes")
+  escalationChannel String  @map("escalation_channel")
+  escalationTarget  String  @map("escalation_target")
+  timeoutAction     String  @map("timeout_action")
+  timeoutMinutes    Int     @map("timeout_minutes")
+  active            Boolean @default(true)
+
+  @@map("escalation_config")
+}
+
+model NotificationChannel {
+  id        String   @id @default(uuid()) @db.Uuid
+  type      String
+  config    Json
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("notification_channel")
+}
+
+model ReviewConfig {
+  id                       String     @id @default(uuid()) @db.Uuid
+  defaultReviewMode        ReviewMode @default(human_only) @map("default_review_mode")
+  aiConfidenceThreshold    Float      @default(0.8) @map("ai_confidence_threshold")
+  aiReviewerEndpoint       String?    @map("ai_reviewer_endpoint")
+  aiReviewerTimeoutMs      Int        @default(10000) @map("ai_reviewer_timeout_ms")
+  aiReviewerModel          String?    @map("ai_reviewer_model")
+  guardrailPipelineEnabled Boolean    @default(false) @map("guardrail_pipeline_enabled")
+  tierConfig               Json?      @map("tier_config")
+  updatedAt                DateTime   @updatedAt @map("updated_at")
+
+  @@map("review_config")
 }
