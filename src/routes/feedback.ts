@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { PrismaClient } from "../generated/prisma/client.js";
+import { recordAuditEvent } from "../services/audit.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_OUTCOMES = ["positive", "negative", "neutral"] as const;
@@ -48,6 +49,23 @@ export function createFeedbackRouter(prisma: PrismaClient): Router {
         data: data ? (data as object) : undefined,
       },
     });
+
+    // Record audit event (best-effort)
+    try {
+      await recordAuditEvent(prisma, {
+        eventType: "feedback.received",
+        submissionId: id,
+        actor: req.apiKey?.name ?? "unknown",
+        actorType: "human",
+        payload: {
+          feedback_id: feedback.id,
+          outcome: feedback.outcome,
+          reason: feedback.reason,
+        },
+      });
+    } catch {
+      // Best-effort audit recording
+    }
 
     res.status(201).json({
       id: feedback.id,
