@@ -10,6 +10,7 @@ export const POLICY_TYPES = [
 export type PolicyType = (typeof POLICY_TYPES)[number];
 
 export interface PolicyResult {
+  policyId: string;
   policyName: string;
   result: "pass" | "match";
   action: "block" | "flag" | "info";
@@ -264,6 +265,7 @@ export async function evaluatePolicies(
     const action = evalResult.action_override ?? policy.action;
 
     results.push({
+      policyId: policy.id,
       policyName: policy.name,
       result: evalResult.match ? "match" : "pass",
       action: action as PolicyResult["action"],
