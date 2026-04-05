@@ -116,24 +116,29 @@ export function createReviewRouter(
     });
 
     // Enqueue webhook if submission has a callback_url and decision is terminal
+    // Best-effort: don't fail the review if webhook enqueueing fails
     if (
       webhookQueue &&
       submission.callbackUrl &&
       (decision === "approved" || decision === "rejected")
     ) {
-      const now = new Date();
-      await enqueueWebhook(webhookQueue, {
-        submissionId: id,
-        callbackUrl: submission.callbackUrl,
-        payload: {
-          submission_id: id,
-          decision,
-          reviewer_type: reviewerType,
-          reviewer_identity: reviewerIdentity,
-          decided_at: now.toISOString(),
-          timestamp: now.toISOString(),
-        },
-      });
+      try {
+        const now = new Date();
+        await enqueueWebhook(webhookQueue, {
+          submissionId: id,
+          callbackUrl: submission.callbackUrl,
+          payload: {
+            submission_id: id,
+            decision,
+            reviewer_type: reviewerType,
+            reviewer_identity: reviewerIdentity,
+            decided_at: now.toISOString(),
+            timestamp: now.toISOString(),
+          },
+        });
+      } catch (err) {
+        console.error(`Failed to enqueue webhook for submission ${id}:`, err);
+      }
     }
 
     res.status(201).json({
@@ -254,20 +259,25 @@ export function createReviewActionsRouter(
     actionTokens.delete(token);
 
     // Enqueue webhook if submission has a callback_url
+    // Best-effort: don't fail the review if webhook enqueueing fails
     if (webhookQueue && submission.callbackUrl) {
-      const now = new Date();
-      await enqueueWebhook(webhookQueue, {
-        submissionId: action.submissionId,
-        callbackUrl: submission.callbackUrl,
-        payload: {
-          submission_id: action.submissionId,
-          decision: action.decision,
-          reviewer_type: "human",
-          reviewer_identity: "token-review",
-          decided_at: now.toISOString(),
-          timestamp: now.toISOString(),
-        },
-      });
+      try {
+        const now = new Date();
+        await enqueueWebhook(webhookQueue, {
+          submissionId: action.submissionId,
+          callbackUrl: submission.callbackUrl,
+          payload: {
+            submission_id: action.submissionId,
+            decision: action.decision,
+            reviewer_type: "human",
+            reviewer_identity: "token-review",
+            decided_at: now.toISOString(),
+            timestamp: now.toISOString(),
+          },
+        });
+      } catch (err) {
+        console.error(`Failed to enqueue webhook for submission ${action.submissionId}:`, err);
+      }
     }
 
     res.status(201).json({

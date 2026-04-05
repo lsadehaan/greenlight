@@ -116,23 +116,28 @@ export function createSubmissionRouter(
     });
 
     // Enqueue webhook if callback_url provided and decision is terminal
+    // Best-effort: don't fail the submission if webhook enqueueing fails
     if (webhookQueue && callback_url && (status === "approved" || status === "rejected")) {
-      const now = new Date();
-      await enqueueWebhook(webhookQueue, {
-        submissionId: submission.id,
-        callbackUrl: callback_url,
-        payload: {
-          submission_id: submission.id,
-          decision: status,
-          policy_results: policyResults.map((r) => ({
-            policy_name: r.policyName,
-            result: r.result,
-            action: r.action,
-          })),
-          decided_at: (decidedAt ?? now).toISOString(),
-          timestamp: now.toISOString(),
-        },
-      });
+      try {
+        const now = new Date();
+        await enqueueWebhook(webhookQueue, {
+          submissionId: submission.id,
+          callbackUrl: callback_url,
+          payload: {
+            submission_id: submission.id,
+            decision: status,
+            policy_results: policyResults.map((r) => ({
+              policy_name: r.policyName,
+              result: r.result,
+              action: r.action,
+            })),
+            decided_at: (decidedAt ?? now).toISOString(),
+            timestamp: now.toISOString(),
+          },
+        });
+      } catch (err) {
+        console.error(`Failed to enqueue webhook for submission ${submission.id}:`, err);
+      }
     }
 
     const response: Record<string, unknown> = {
