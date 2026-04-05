@@ -127,11 +127,11 @@ export function createAIReviewWorker(
       let finalDecision: "approved" | "rejected" | "escalated";
 
       if (reviewMode === "ai_only") {
-        // AI verdict is final (approve or reject only)
+        // AI verdict is final; escalated falls back to pending for human review (fail-open)
         finalDecision =
           aiResponse.decision === "approved" || aiResponse.decision === "rejected"
             ? aiResponse.decision
-            : "rejected"; // treat escalated as rejected in ai_only mode
+            : "escalated";
       } else {
         // ai_then_human mode
         if (aiResponse.confidence >= threshold) {
@@ -143,6 +143,24 @@ export function createAIReviewWorker(
           // Low confidence — escalate to human
           finalDecision = "escalated";
         }
+      }
+
+      // Check submission is still pending (guard against race with human review)
+      const currentSubmission = await prisma.submission.findUnique({
+        where: { id: submissionId },
+        select: { status: true },
+      });
+      if (!currentSubmission || currentSubmission.status !== "pending") {
+        // Submission already decided — skip AI review
+        return;
+      }
+
+      // Check for existing AI review (idempotency guard for retries)
+      const existingAIReview = await prisma.review.findFirst({
+        where: { submissionId, reviewerType: "ai" },
+      });
+      if (existingAIReview) {
+        return;
       }
 
       // Store AI review record
