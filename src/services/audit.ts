@@ -14,7 +14,8 @@ export type AuditEventType =
   | "notification.delivered"
   | "notification.failed"
   | "escalation.triggered"
-  | "review_config.updated";
+  | "review_config.updated"
+  | "retention.cleanup";
 
 export type AuditActorType = "human" | "ai" | "system" | "guardrail";
 

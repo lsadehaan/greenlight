@@ -17,4 +17,5 @@ export const config = {
   smtpPass: process.env.SMTP_PASS || "",
   smtpFrom: process.env.SMTP_FROM || "noreply@greenlight.local",
   appBaseUrl: process.env.APP_BASE_URL || "http://localhost:3000",
+  dataRetentionDays: parseInt(process.env.DATA_RETENTION_DAYS || "90", 10),
 };

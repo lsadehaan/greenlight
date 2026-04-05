@@ -22,6 +22,7 @@ import { createWebhookQueue, createWebhookWorker } from "./workers/webhook.js";
 import { createAIReviewQueue, createAIReviewWorker } from "./workers/ai-review.js";
 import { createNotificationQueue, createNotificationWorker } from "./workers/notification.js";
 import { createEscalationWorker } from "./workers/escalation.js";
+import { createRetentionWorker, runCleanup } from "./workers/retention.js";
 import { createReviewUIRouter } from "./routes/review-ui.js";
 import swaggerUi from "swagger-ui-express";
 import { openapiSpec } from "./openapi.js";
@@ -64,6 +65,10 @@ app.use("/api/v1/notification-channels", createNotificationChannelRouter(prisma)
 app.use("/api/v1/escalation-config", createEscalationConfigRouter(prisma));
 app.use("/api/v1/review-config", createReviewConfigRouter(prisma));
 app.use("/api/v1/analytics", createAnalyticsRouter(prisma));
+app.post("/api/v1/admin/retention/trigger", async (_req, res) => {
+  const result = await runCleanup(prisma, config.dataRetentionDays);
+  res.json({ triggered: true, ...result });
+});
 
 async function start(): Promise<void> {
   const worker = createWebhookWorker(prisma, config.redisUrl);
@@ -93,6 +98,9 @@ async function start(): Promise<void> {
     webhookQueue,
   );
   console.log(`Escalation worker started (queue: ${escalationWorker.name})`);
+
+  const retentionWorker = createRetentionWorker(prisma, config.redisUrl, config.dataRetentionDays);
+  console.log(`Retention worker started (queue: ${retentionWorker.name}, retention: ${config.dataRetentionDays} days)`);
 
   app.listen(config.port, () => {
     console.log(`Greenlight API listening on port ${config.port}`);
