@@ -10,4 +10,5 @@ export const config = {
   redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
   nodeEnv: process.env.NODE_ENV || "development",
   version: pkg.version,
+  webhookSecret: process.env.WEBHOOK_SECRET || "greenlight-dev-secret",
 };

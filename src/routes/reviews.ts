@@ -1,6 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { Router } from "express";
+import type { Queue } from "bullmq";
 import type { PrismaClient } from "../generated/prisma/client.js";
+import type { WebhookJobData } from "../workers/webhook.js";
+import { enqueueWebhook } from "../workers/webhook.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_DECISIONS = ["approved", "rejected", "escalated"] as const;
@@ -14,7 +17,10 @@ const actionTokens = new Map<
 
 const TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-export function createReviewRouter(prisma: PrismaClient): Router {
+export function createReviewRouter(
+  prisma: PrismaClient,
+  webhookQueue?: Queue<WebhookJobData>,
+): Router {
   const router = Router();
 
   // POST /api/v1/submissions/:id/review — submit a review decision
@@ -109,6 +115,32 @@ export function createReviewRouter(prisma: PrismaClient): Router {
       return rev;
     });
 
+    // Enqueue webhook if submission has a callback_url and decision is terminal
+    // Best-effort: don't fail the review if webhook enqueueing fails
+    if (
+      webhookQueue &&
+      submission.callbackUrl &&
+      (decision === "approved" || decision === "rejected")
+    ) {
+      try {
+        const now = new Date();
+        await enqueueWebhook(webhookQueue, {
+          submissionId: id,
+          callbackUrl: submission.callbackUrl,
+          payload: {
+            submission_id: id,
+            decision,
+            reviewer_type: reviewerType,
+            reviewer_identity: reviewerIdentity,
+            decided_at: now.toISOString(),
+            timestamp: now.toISOString(),
+          },
+        });
+      } catch (err) {
+        console.error(`Failed to enqueue webhook for submission ${id}:`, err);
+      }
+    }
+
     res.status(201).json({
       id: review.id,
       submission_id: review.submissionId,
@@ -160,7 +192,10 @@ export function createReviewRouter(prisma: PrismaClient): Router {
 }
 
 /** Public router for token-based review actions (no auth required) */
-export function createReviewActionsRouter(prisma: PrismaClient): Router {
+export function createReviewActionsRouter(
+  prisma: PrismaClient,
+  webhookQueue?: Queue<WebhookJobData>,
+): Router {
   const router = Router();
 
   router.post("/:token", async (req, res) => {
@@ -222,6 +257,28 @@ export function createReviewActionsRouter(prisma: PrismaClient): Router {
     });
 
     actionTokens.delete(token);
+
+    // Enqueue webhook if submission has a callback_url
+    // Best-effort: don't fail the review if webhook enqueueing fails
+    if (webhookQueue && submission.callbackUrl) {
+      try {
+        const now = new Date();
+        await enqueueWebhook(webhookQueue, {
+          submissionId: action.submissionId,
+          callbackUrl: submission.callbackUrl,
+          payload: {
+            submission_id: action.submissionId,
+            decision: action.decision,
+            reviewer_type: "human",
+            reviewer_identity: "token-review",
+            decided_at: now.toISOString(),
+            timestamp: now.toISOString(),
+          },
+        });
+      } catch (err) {
+        console.error(`Failed to enqueue webhook for submission ${action.submissionId}:`, err);
+      }
+    }
 
     res.status(201).json({
       id: review.id,

@@ -1,10 +1,16 @@
 import { Router } from "express";
+import type { Queue } from "bullmq";
 import type { PrismaClient } from "../generated/prisma/client.js";
 import { evaluatePolicies } from "../engine/policy.js";
+import type { WebhookJobData } from "../workers/webhook.js";
+import { enqueueWebhook } from "../workers/webhook.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function createSubmissionRouter(prisma: PrismaClient): Router {
+export function createSubmissionRouter(
+  prisma: PrismaClient,
+  webhookQueue?: Queue<WebhookJobData>,
+): Router {
   const router = Router();
 
   router.post("/", async (req, res) => {
@@ -108,6 +114,31 @@ export function createSubmissionRouter(prisma: PrismaClient): Router {
 
       return sub;
     });
+
+    // Enqueue webhook if callback_url provided and decision is terminal
+    // Best-effort: don't fail the submission if webhook enqueueing fails
+    if (webhookQueue && callback_url && (status === "approved" || status === "rejected")) {
+      try {
+        const now = new Date();
+        await enqueueWebhook(webhookQueue, {
+          submissionId: submission.id,
+          callbackUrl: callback_url,
+          payload: {
+            submission_id: submission.id,
+            decision: status,
+            policy_results: policyResults.map((r) => ({
+              policy_name: r.policyName,
+              result: r.result,
+              action: r.action,
+            })),
+            decided_at: (decidedAt ?? now).toISOString(),
+            timestamp: now.toISOString(),
+          },
+        });
+      } catch (err) {
+        console.error(`Failed to enqueue webhook for submission ${submission.id}:`, err);
+      }
+    }
 
     const response: Record<string, unknown> = {
       id: submission.id,
