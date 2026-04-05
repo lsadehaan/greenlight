@@ -1,5 +1,290 @@
 import { Router } from "express";
 import type { PrismaClient } from "../generated/prisma/client.js";
+import { Prisma } from "../generated/prisma/client.js";
+
+// ── Types ────────────────────────────────────────────────────────────────────
+
+interface SummaryFilters {
+  from?: Date;
+  to?: Date;
+  channel?: string;
+}
+
+interface ReviewTimeRow {
+  decided_count: number;
+  avg_review_seconds: number;
+  median_review_seconds: number;
+  sla_compliant_count: number;
+}
+
+interface GuardrailFunnelRow {
+  cleared_submissions: number;
+  rejected_submissions: number;
+}
+
+interface AIStatsRow {
+  total_ai_reviews: number;
+  avg_confidence: number;
+  approved_count: number;
+  rejected_count: number;
+  escalated_count: number;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function buildPrismaWhere(filters: SummaryFilters): Record<string, unknown> {
+  const dateFilter: Record<string, unknown> = {};
+  if (filters.from) dateFilter.gte = filters.from;
+  if (filters.to) dateFilter.lte = filters.to;
+  const where: Record<string, unknown> = {};
+  if (Object.keys(dateFilter).length > 0) where.createdAt = dateFilter;
+  if (filters.channel) where.channel = filters.channel;
+  return where;
+}
+
+function buildSqlFilter(filters: SummaryFilters): Prisma.Sql {
+  const parts: Prisma.Sql[] = [];
+  if (filters.from) parts.push(Prisma.sql`s.created_at >= ${filters.from}`);
+  if (filters.to) parts.push(Prisma.sql`s.created_at <= ${filters.to}`);
+  if (filters.channel) parts.push(Prisma.sql`s.channel = ${filters.channel}`);
+  return parts.length > 0
+    ? Prisma.sql`AND ${Prisma.join(parts, " AND ")}`
+    : Prisma.empty;
+}
+
+function round(value: number, decimals: number): number {
+  const factor = Math.pow(10, decimals);
+  return Math.round(value * factor) / factor;
+}
+
+// ── Summary computation (shared with dashboard) ─────────────────────────────
+
+export async function computeSummary(prisma: PrismaClient, filters: SummaryFilters = {}) {
+  const where = buildPrismaWhere(filters);
+  const sf = buildSqlFilter(filters);
+
+  const [
+    statusCounts,
+    channelCounts,
+    reviewTimeStats,
+    rejectionReasons,
+    feedbackCounts,
+    rulesCounts,
+    guardrailFunnel,
+    aiStats,
+    humanReviewCount,
+    guardrailByNameRows,
+  ] = await Promise.all([
+    // 1. Status breakdown
+    prisma.submission.groupBy({
+      by: ["status"],
+      _count: { _all: true },
+      where,
+    }),
+
+    // 2. Channel + status breakdown
+    prisma.submission.groupBy({
+      by: ["channel", "status"],
+      _count: { _all: true },
+      where,
+    }),
+
+    // 3. Avg/median review time + SLA compliance
+    prisma.$queryRaw<ReviewTimeRow[]>`
+      SELECT
+        COUNT(*)::int AS decided_count,
+        COALESCE(AVG(EXTRACT(EPOCH FROM (s.decided_at - s.created_at))), 0)::float8 AS avg_review_seconds,
+        COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (
+          ORDER BY EXTRACT(EPOCH FROM (s.decided_at - s.created_at))
+        ), 0)::float8 AS median_review_seconds,
+        COUNT(*) FILTER (
+          WHERE EXTRACT(EPOCH FROM (s.decided_at - s.created_at)) / 60 <= 60
+        )::int AS sla_compliant_count
+      FROM submission s
+      WHERE s.decided_at IS NOT NULL ${sf}
+    `,
+
+    // 4. Top rejection reasons (policy name via JOIN)
+    prisma.$queryRaw<{ name: string; count: number }[]>`
+      SELECT p.name, COUNT(*)::int AS count
+      FROM policy_evaluation pe
+      JOIN policy p ON pe.policy_id = p.id
+      JOIN submission s ON pe.submission_id = s.id
+      WHERE pe.result IN ('block', 'flag') ${sf}
+      GROUP BY p.name
+      ORDER BY count DESC
+      LIMIT 10
+    `,
+
+    // 5. Feedback breakdown
+    prisma.feedback.groupBy({
+      by: ["outcome"],
+      _count: { _all: true },
+      where: { submission: where },
+    }),
+
+    // 6. Rules auto-decided funnel
+    prisma.submission.groupBy({
+      by: ["status"],
+      _count: { _all: true },
+      where: { ...where, decidedBy: "rules" },
+    }),
+
+    // 7. Guardrail funnel: count DISTINCT submissions (not evaluations)
+    prisma.$queryRaw<GuardrailFunnelRow[]>`
+      SELECT
+        COUNT(*) FILTER (WHERE NOT has_fail)::int AS cleared_submissions,
+        COUNT(*) FILTER (WHERE has_fail)::int AS rejected_submissions
+      FROM (
+        SELECT ge.submission_id, BOOL_OR(ge.verdict = 'fail') AS has_fail
+        FROM guardrail_evaluation ge
+        JOIN submission s ON ge.submission_id = s.id
+        WHERE TRUE ${sf}
+        GROUP BY ge.submission_id
+      ) sub_verdicts
+    `,
+
+    // 8. AI review aggregate
+    prisma.$queryRaw<AIStatsRow[]>`
+      SELECT
+        COUNT(*)::int AS total_ai_reviews,
+        COALESCE(AVG(r.confidence), 0)::float8 AS avg_confidence,
+        COUNT(*) FILTER (WHERE r.decision = 'approved')::int AS approved_count,
+        COUNT(*) FILTER (WHERE r.decision = 'rejected')::int AS rejected_count,
+        COUNT(*) FILTER (WHERE r.decision = 'escalated')::int AS escalated_count
+      FROM review r
+      JOIN submission s ON r.submission_id = s.id
+      WHERE r.reviewer_type = 'ai' ${sf}
+    `,
+
+    // 9. Human review count
+    prisma.review.count({
+      where: { reviewerType: "human", submission: where },
+    }),
+
+    // 10. Guardrail stats by name
+    prisma.$queryRaw<{ name: string; verdict: string; count: number }[]>`
+      SELECT g.name, ge.verdict::text AS verdict, COUNT(*)::int AS count
+      FROM guardrail_evaluation ge
+      JOIN guardrail g ON ge.guardrail_id = g.id
+      JOIN submission s ON ge.submission_id = s.id
+      WHERE TRUE ${sf}
+      GROUP BY g.name, ge.verdict
+    `,
+  ]);
+
+  // Process status counts
+  const statusMap: Record<string, number> = {};
+  for (const row of statusCounts) {
+    statusMap[row.status] = row._count._all;
+  }
+  const approved = statusMap["approved"] || 0;
+  const rejected = statusMap["rejected"] || 0;
+  const pending = statusMap["pending"] || 0;
+  const total = approved + rejected + pending;
+  const approvalRate = total > 0 ? approved / total : 0;
+
+  // Process channel breakdown
+  const byChannel: Record<string, { total: number; approved: number; rejected: number; pending: number }> = {};
+  for (const row of channelCounts) {
+    if (!byChannel[row.channel]) {
+      byChannel[row.channel] = { total: 0, approved: 0, rejected: 0, pending: 0 };
+    }
+    const count = row._count._all;
+    byChannel[row.channel].total += count;
+    if (row.status === "approved") byChannel[row.channel].approved = count;
+    else if (row.status === "rejected") byChannel[row.channel].rejected = count;
+    else if (row.status === "pending") byChannel[row.channel].pending = count;
+  }
+
+  // Review time stats
+  const rts = reviewTimeStats[0];
+  const decidedCount = rts?.decided_count ?? 0;
+  const avgReviewTime = rts?.avg_review_seconds ?? 0;
+  const medianReviewTime = rts?.median_review_seconds ?? 0;
+  const slaComplianceRate = decidedCount > 0 ? (rts?.sla_compliant_count ?? 0) / decidedCount : 1;
+
+  // Rejection reasons
+  const topRejectionReasons = rejectionReasons.map((r) => ({
+    reason: r.name,
+    count: Number(r.count),
+  }));
+
+  // Feedback summary
+  const feedbackMap: Record<string, number> = {};
+  let feedbackTotal = 0;
+  for (const row of feedbackCounts) {
+    feedbackMap[row.outcome] = row._count._all;
+    feedbackTotal += row._count._all;
+  }
+
+  // Rules funnel
+  const rulesMap: Record<string, number> = {};
+  for (const row of rulesCounts) {
+    rulesMap[row.status] = row._count._all;
+  }
+
+  // Guardrail funnel (distinct submissions, not evaluations)
+  const gf = guardrailFunnel[0];
+
+  // AI stats
+  const ai = aiStats[0];
+  const totalAi = ai?.total_ai_reviews ?? 0;
+
+  // Guardrail stats by name
+  const guardrailByName: Record<string, { pass: number; fail: number; flag: number }> = {};
+  let totalGuardrailEvals = 0;
+  for (const row of guardrailByNameRows) {
+    if (!guardrailByName[row.name]) {
+      guardrailByName[row.name] = { pass: 0, fail: 0, flag: 0 };
+    }
+    const count = Number(row.count);
+    if (row.verdict === "pass") guardrailByName[row.name].pass = count;
+    else if (row.verdict === "fail") guardrailByName[row.name].fail = count;
+    else if (row.verdict === "flag") guardrailByName[row.name].flag = count;
+    totalGuardrailEvals += count;
+  }
+
+  return {
+    total_submissions: total,
+    approved,
+    rejected,
+    pending,
+    approval_rate: round(approvalRate, 4),
+    avg_review_time_seconds: round(avgReviewTime, 2),
+    median_review_time_seconds: round(medianReviewTime, 2),
+    top_rejection_reasons: topRejectionReasons,
+    by_channel: byChannel,
+    feedback_summary: {
+      total: feedbackTotal,
+      positive: feedbackMap["positive"] || 0,
+      negative: feedbackMap["negative"] || 0,
+      neutral: feedbackMap["neutral"] || 0,
+    },
+    sla_compliance_rate: round(slaComplianceRate, 4),
+    review_tier_funnel: {
+      auto_approved_by_rules: rulesMap["approved"] || 0,
+      auto_rejected_by_rules: rulesMap["rejected"] || 0,
+      cleared_by_guardrails: gf?.cleared_submissions ?? 0,
+      rejected_by_guardrails: gf?.rejected_submissions ?? 0,
+      cleared_by_ai_review: ai?.approved_count ?? 0,
+      rejected_by_ai_review: ai?.rejected_count ?? 0,
+      escalated_to_human: ai?.escalated_count ?? 0,
+      decided_by_human: humanReviewCount,
+    },
+    ai_review_stats: {
+      total_ai_reviews: totalAi,
+      avg_ai_confidence: round(ai?.avg_confidence ?? 0, 4),
+      ai_escalation_rate: round(totalAi > 0 ? (ai?.escalated_count ?? 0) / totalAi : 0, 4),
+    },
+    guardrail_stats: {
+      total_evaluations: totalGuardrailEvals,
+      by_guardrail: guardrailByName,
+    },
+  };
+}
+
+// ── Router ───────────────────────────────────────────────────────────────────
 
 export function createAnalyticsRouter(prisma: PrismaClient): Router {
   const router = Router();
@@ -19,162 +304,8 @@ export function createAnalyticsRouter(prisma: PrismaClient): Router {
       return;
     }
 
-    const dateFilter: Record<string, unknown> = {};
-    if (from) dateFilter.gte = from;
-    if (to) dateFilter.lte = to;
-
-    const where: Record<string, unknown> = {};
-    if (Object.keys(dateFilter).length > 0) where.createdAt = dateFilter;
-    if (channel) where.channel = channel;
-
-    const [submissions, reviews, feedbacks, policyEvals, guardrailEvals] = await Promise.all([
-      prisma.submission.findMany({
-        where,
-        select: {
-          id: true,
-          status: true,
-          channel: true,
-          decidedBy: true,
-          decidedAt: true,
-          createdAt: true,
-        },
-      }),
-      prisma.review.findMany({
-        where: {
-          submission: where,
-        },
-        select: {
-          submissionId: true,
-          reviewerType: true,
-          decision: true,
-          confidence: true,
-          createdAt: true,
-        },
-      }),
-      prisma.feedback.findMany({
-        where: { submission: where },
-        select: { outcome: true },
-      }),
-      prisma.policyEvaluation.findMany({
-        where: { submission: where },
-        select: {
-          result: true,
-          actionTaken: true,
-          policy: { select: { name: true } },
-        },
-      }),
-      prisma.guardrailEvaluation.findMany({
-        where: { submission: where },
-        select: {
-          verdict: true,
-          confidence: true,
-          guardrail: { select: { name: true } },
-        },
-      }),
-    ]);
-
-    const total = submissions.length;
-    const approved = submissions.filter((s) => s.status === "approved").length;
-    const rejected = submissions.filter((s) => s.status === "rejected").length;
-    const pending = submissions.filter((s) => s.status === "pending").length;
-    const approvalRate = total > 0 ? approved / total : 0;
-
-    // Review times (seconds)
-    const reviewTimes = submissions
-      .filter((s) => s.decidedAt)
-      .map((s) => (s.decidedAt!.getTime() - s.createdAt.getTime()) / 1000);
-    const avgReviewTime = reviewTimes.length > 0
-      ? reviewTimes.reduce((a, b) => a + b, 0) / reviewTimes.length
-      : 0;
-    const medianReviewTime = median(reviewTimes);
-
-    // Top rejection reasons from policy evaluations
-    const rejectionReasons: Record<string, number> = {};
-    for (const pe of policyEvals) {
-      if (pe.result === "block" || pe.result === "flag") {
-        const name = (pe.policy as { name: string }).name;
-        rejectionReasons[name] = (rejectionReasons[name] || 0) + 1;
-      }
-    }
-    const topRejectionReasons = Object.entries(rejectionReasons)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 10)
-      .map(([reason, count]) => ({ reason, count }));
-
-    // By channel
-    const byChannel: Record<string, { total: number; approved: number; rejected: number; pending: number }> = {};
-    for (const sub of submissions) {
-      if (!byChannel[sub.channel]) {
-        byChannel[sub.channel] = { total: 0, approved: 0, rejected: 0, pending: 0 };
-      }
-      byChannel[sub.channel].total++;
-      if (sub.status === "approved") byChannel[sub.channel].approved++;
-      else if (sub.status === "rejected") byChannel[sub.channel].rejected++;
-      else byChannel[sub.channel].pending++;
-    }
-
-    // Feedback summary
-    const feedbackSummary = {
-      total: feedbacks.length,
-      positive: feedbacks.filter((f) => f.outcome === "positive").length,
-      negative: feedbacks.filter((f) => f.outcome === "negative").length,
-      neutral: feedbacks.filter((f) => f.outcome === "neutral").length,
-    };
-
-    // Review tier funnel
-    const funnel = buildTierFunnel(submissions, policyEvals, guardrailEvals, reviews);
-
-    // AI review stats
-    const aiReviews = reviews.filter((r) => r.reviewerType === "ai");
-    const aiConfidences = aiReviews
-      .filter((r) => r.confidence != null)
-      .map((r) => r.confidence as number);
-    const aiEscalated = aiReviews.filter((r) => r.decision === "escalated").length;
-    const aiStats = {
-      total_ai_reviews: aiReviews.length,
-      avg_ai_confidence: aiConfidences.length > 0
-        ? aiConfidences.reduce((a, b) => a + b, 0) / aiConfidences.length
-        : 0,
-      ai_escalation_rate: aiReviews.length > 0 ? aiEscalated / aiReviews.length : 0,
-    };
-
-    // Guardrail stats
-    const guardrailByName: Record<string, { pass: number; fail: number; flag: number }> = {};
-    for (const ge of guardrailEvals) {
-      const name = (ge.guardrail as { name: string }).name;
-      if (!guardrailByName[name]) guardrailByName[name] = { pass: 0, fail: 0, flag: 0 };
-      if (ge.verdict === "pass") guardrailByName[name].pass++;
-      else if (ge.verdict === "fail") guardrailByName[name].fail++;
-      else if (ge.verdict === "flag") guardrailByName[name].flag++;
-    }
-    const guardrailStats = {
-      total_evaluations: guardrailEvals.length,
-      by_guardrail: guardrailByName,
-    };
-
-    // SLA compliance (submissions decided within 60 minutes)
-    const decided = submissions.filter((s) => s.decidedAt);
-    const withinSLA = decided.filter(
-      (s) => (s.decidedAt!.getTime() - s.createdAt.getTime()) / 60000 <= 60,
-    );
-    const slaComplianceRate = decided.length > 0 ? withinSLA.length / decided.length : 1;
-
-    res.json({
-      total_submissions: total,
-      approved,
-      rejected,
-      pending,
-      approval_rate: round(approvalRate, 4),
-      avg_review_time_seconds: round(avgReviewTime, 2),
-      median_review_time_seconds: round(medianReviewTime, 2),
-      top_rejection_reasons: topRejectionReasons,
-      by_channel: byChannel,
-      feedback_summary: feedbackSummary,
-      sla_compliance_rate: round(slaComplianceRate, 4),
-      review_tier_funnel: funnel,
-      ai_review_stats: aiStats,
-      guardrail_stats: guardrailStats,
-    });
+    const summary = await computeSummary(prisma, { from, to, channel });
+    res.json(summary);
   });
 
   // GET /api/v1/analytics/submissions — paginated history
@@ -262,47 +393,4 @@ export function createAnalyticsRouter(prisma: PrismaClient): Router {
   });
 
   return router;
-}
-
-function buildTierFunnel(
-  submissions: { id: string; status: string; decidedBy: string | null }[],
-  policyEvals: { result: string; actionTaken: string }[],
-  guardrailEvals: { verdict: string }[],
-  reviews: { submissionId: string; reviewerType: string; decision: string }[],
-) {
-  const autoApprovedByRules = submissions.filter((s) => s.decidedBy === "rules" && s.status === "approved").length;
-  const autoRejectedByRules = submissions.filter((s) => s.decidedBy === "rules" && s.status === "rejected").length;
-
-  const guardrailPasses = guardrailEvals.filter((g) => g.verdict === "pass").length;
-  const guardrailRejects = guardrailEvals.filter((g) => g.verdict === "fail").length;
-
-  const aiReviews = reviews.filter((r) => r.reviewerType === "ai");
-  const aiCleared = aiReviews.filter((r) => r.decision === "approved").length;
-  const aiRejected = aiReviews.filter((r) => r.decision === "rejected").length;
-  const aiEscalated = aiReviews.filter((r) => r.decision === "escalated").length;
-
-  const humanReviews = reviews.filter((r) => r.reviewerType === "human");
-
-  return {
-    auto_approved_by_rules: autoApprovedByRules,
-    auto_rejected_by_rules: autoRejectedByRules,
-    cleared_by_guardrails: guardrailPasses,
-    rejected_by_guardrails: guardrailRejects,
-    cleared_by_ai_review: aiCleared,
-    rejected_by_ai_review: aiRejected,
-    escalated_to_human: aiEscalated,
-    decided_by_human: humanReviews.length,
-  };
-}
-
-function median(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
-function round(value: number, decimals: number): number {
-  const factor = Math.pow(10, decimals);
-  return Math.round(value * factor) / factor;
 }

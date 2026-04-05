@@ -5,58 +5,78 @@ import { createAnalyticsRouter } from "./analytics.js";
 
 const now = new Date("2026-04-05T12:00:00Z");
 const oneHourAgo = new Date(now.getTime() - 3600 * 1000);
-const twoHoursAgo = new Date(now.getTime() - 7200 * 1000);
 
-const submissions = [
-  { id: "s1", status: "approved", channel: "email", decidedBy: "rules", decidedAt: new Date(oneHourAgo.getTime() + 300000), createdAt: oneHourAgo },
-  { id: "s2", status: "rejected", channel: "slack", decidedBy: "ai", decidedAt: new Date(twoHoursAgo.getTime() + 600000), createdAt: twoHoursAgo },
-  { id: "s3", status: "pending", channel: "email", decidedBy: null, decidedAt: null, createdAt: now },
-  { id: "s4", status: "approved", channel: "email", decidedBy: "human", decidedAt: new Date(oneHourAgo.getTime() + 1800000), createdAt: oneHourAgo },
-];
+// ── Mock factory ─────────────────────────────────────────────────────────────
 
-const reviews = [
-  { submissionId: "s2", reviewerType: "ai", decision: "rejected", confidence: 0.9, createdAt: twoHoursAgo },
-  { submissionId: "s4", reviewerType: "human", decision: "approved", confidence: null, createdAt: oneHourAgo },
-  { submissionId: "s2", reviewerType: "ai", decision: "escalated", confidence: 0.6, createdAt: twoHoursAgo },
-];
-
-const feedbacks = [
-  { outcome: "positive" },
-  { outcome: "negative" },
-  { outcome: "positive" },
-];
-
-const policyEvals = [
-  { result: "pass", actionTaken: "info", policy: { name: "length-check" } },
-  { result: "block", actionTaken: "block", policy: { name: "profanity" } },
-  { result: "flag", actionTaken: "flag", policy: { name: "profanity" } },
-];
-
-const guardrailEvals = [
-  { verdict: "pass", confidence: 0.95, guardrail: { name: "toxicity" } },
-  { verdict: "fail", confidence: 0.8, guardrail: { name: "toxicity" } },
-  { verdict: "pass", confidence: 0.99, guardrail: { name: "pii-detector" } },
-];
+// $queryRaw is called 5 times in order:
+// 1. reviewTimeStats  2. rejectionReasons  3. guardrailFunnel  4. aiStats  5. guardrailByName
+function summaryQueryRawMock() {
+  return vi.fn()
+    // 1. Review time stats
+    .mockResolvedValueOnce([{
+      decided_count: 3,
+      avg_review_seconds: 550,
+      median_review_seconds: 450,
+      sla_compliant_count: 2,
+    }])
+    // 2. Rejection reasons
+    .mockResolvedValueOnce([
+      { name: "profanity", count: 2 },
+    ])
+    // 3. Guardrail funnel (distinct submissions)
+    .mockResolvedValueOnce([{
+      cleared_submissions: 1,
+      rejected_submissions: 1,
+    }])
+    // 4. AI review stats
+    .mockResolvedValueOnce([{
+      total_ai_reviews: 2,
+      avg_confidence: 0.75,
+      approved_count: 0,
+      rejected_count: 1,
+      escalated_count: 1,
+    }])
+    // 5. Guardrail stats by name
+    .mockResolvedValueOnce([
+      { name: "toxicity", verdict: "pass", count: 1 },
+      { name: "toxicity", verdict: "fail", count: 1 },
+      { name: "pii-detector", verdict: "pass", count: 1 },
+    ]);
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function baseMocks(): any {
   return {
     submission: {
-      findMany: vi.fn().mockResolvedValue(submissions),
-      count: vi.fn().mockResolvedValue(submissions.length),
+      // groupBy called 3 times: statusCounts, channelCounts, rulesCounts
+      groupBy: vi.fn()
+        .mockResolvedValueOnce([
+          { status: "approved", _count: { _all: 2 } },
+          { status: "rejected", _count: { _all: 1 } },
+          { status: "pending", _count: { _all: 1 } },
+        ])
+        .mockResolvedValueOnce([
+          { channel: "email", status: "approved", _count: { _all: 2 } },
+          { channel: "email", status: "pending", _count: { _all: 1 } },
+          { channel: "slack", status: "rejected", _count: { _all: 1 } },
+        ])
+        .mockResolvedValueOnce([
+          { status: "approved", _count: { _all: 1 } },
+        ]),
+      // findMany + count used by /submissions endpoint
+      findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(4),
     },
     review: {
-      findMany: vi.fn().mockResolvedValue(reviews),
+      count: vi.fn().mockResolvedValue(1),
     },
     feedback: {
-      findMany: vi.fn().mockResolvedValue(feedbacks),
+      groupBy: vi.fn().mockResolvedValueOnce([
+        { outcome: "positive", _count: { _all: 2 } },
+        { outcome: "negative", _count: { _all: 1 } },
+      ]),
     },
-    policyEvaluation: {
-      findMany: vi.fn().mockResolvedValue(policyEvals),
-    },
-    guardrailEvaluation: {
-      findMany: vi.fn().mockResolvedValue(guardrailEvals),
-    },
+    $queryRaw: summaryQueryRawMock(),
   };
 }
 
@@ -72,6 +92,8 @@ function buildApp(mockPrisma: ReturnType<typeof baseMocks>) {
   return app;
 }
 
+// ── Summary endpoint ─────────────────────────────────────────────────────────
+
 describe("GET /api/v1/analytics/summary", () => {
   it("returns all summary fields", async () => {
     const app = buildApp(baseMocks());
@@ -83,8 +105,8 @@ describe("GET /api/v1/analytics/summary", () => {
     expect(res.body.rejected).toBe(1);
     expect(res.body.pending).toBe(1);
     expect(res.body.approval_rate).toBe(0.5);
-    expect(res.body.avg_review_time_seconds).toBeGreaterThan(0);
-    expect(res.body.median_review_time_seconds).toBeGreaterThan(0);
+    expect(res.body.avg_review_time_seconds).toBe(550);
+    expect(res.body.median_review_time_seconds).toBe(450);
     expect(res.body.sla_compliance_rate).toBeGreaterThanOrEqual(0);
   });
 
@@ -114,14 +136,15 @@ describe("GET /api/v1/analytics/summary", () => {
     expect(res.body.feedback_summary.negative).toBe(1);
   });
 
-  it("returns review tier funnel", async () => {
+  it("returns review tier funnel with distinct submission counts", async () => {
     const app = buildApp(baseMocks());
     const res = await request(app).get("/api/v1/analytics/summary");
 
     const funnel = res.body.review_tier_funnel;
     expect(funnel.auto_approved_by_rules).toBe(1);
     expect(funnel.auto_rejected_by_rules).toBe(0);
-    expect(funnel.cleared_by_guardrails).toBe(2);
+    // MAJOR 2 fix: counts distinct submissions, not individual evaluations
+    expect(funnel.cleared_by_guardrails).toBe(1);
     expect(funnel.rejected_by_guardrails).toBe(1);
     expect(funnel.decided_by_human).toBe(1);
     expect(funnel.escalated_to_human).toBe(1);
@@ -146,22 +169,23 @@ describe("GET /api/v1/analytics/summary", () => {
     expect(res.body.guardrail_stats.by_guardrail["pii-detector"].pass).toBe(1);
   });
 
-  it("applies date range filter", async () => {
+  it("applies date range filter to groupBy", async () => {
     const mocks = baseMocks();
     const app = buildApp(mocks);
     await request(app).get("/api/v1/analytics/summary?from=2026-04-01&to=2026-04-30");
 
-    const call = mocks.submission.findMany.mock.calls[0][0];
+    // First groupBy call is statusCounts
+    const call = mocks.submission.groupBy.mock.calls[0][0];
     expect(call.where.createdAt.gte).toBeInstanceOf(Date);
     expect(call.where.createdAt.lte).toBeInstanceOf(Date);
   });
 
-  it("applies channel filter", async () => {
+  it("applies channel filter to groupBy", async () => {
     const mocks = baseMocks();
     const app = buildApp(mocks);
     await request(app).get("/api/v1/analytics/summary?channel=email");
 
-    const call = mocks.submission.findMany.mock.calls[0][0];
+    const call = mocks.submission.groupBy.mock.calls[0][0];
     expect(call.where.channel).toBe("email");
   });
 
@@ -173,11 +197,16 @@ describe("GET /api/v1/analytics/summary", () => {
 
   it("handles empty data", async () => {
     const mocks = baseMocks();
-    mocks.submission.findMany = vi.fn().mockResolvedValue([]);
-    mocks.review.findMany = vi.fn().mockResolvedValue([]);
-    mocks.feedback.findMany = vi.fn().mockResolvedValue([]);
-    mocks.policyEvaluation.findMany = vi.fn().mockResolvedValue([]);
-    mocks.guardrailEvaluation.findMany = vi.fn().mockResolvedValue([]);
+    // Override all mocks with empty results
+    mocks.submission.groupBy = vi.fn().mockResolvedValue([]);
+    mocks.feedback.groupBy = vi.fn().mockResolvedValue([]);
+    mocks.review.count = vi.fn().mockResolvedValue(0);
+    mocks.$queryRaw = vi.fn()
+      .mockResolvedValueOnce([{ decided_count: 0, avg_review_seconds: 0, median_review_seconds: 0, sla_compliant_count: 0 }])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ cleared_submissions: 0, rejected_submissions: 0 }])
+      .mockResolvedValueOnce([{ total_ai_reviews: 0, avg_confidence: 0, approved_count: 0, rejected_count: 0, escalated_count: 0 }])
+      .mockResolvedValueOnce([]);
     const app = buildApp(mocks);
     const res = await request(app).get("/api/v1/analytics/summary");
 
@@ -187,6 +216,8 @@ describe("GET /api/v1/analytics/summary", () => {
     expect(res.body.avg_review_time_seconds).toBe(0);
   });
 });
+
+// ── Submissions endpoint (paginated, unchanged) ─────────────────────────────
 
 describe("GET /api/v1/analytics/submissions", () => {
   it("returns paginated submissions", async () => {
