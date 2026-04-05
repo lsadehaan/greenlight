@@ -10,18 +10,20 @@ import { createApiKeyRouter } from "./routes/api-keys.js";
 import { createPolicyRouter } from "./routes/policies.js";
 import { createSubmissionRouter } from "./routes/submissions.js";
 import { createReviewRouter, createReviewActionsRouter } from "./routes/reviews.js";
+import { createWebhookQueue, createWebhookWorker } from "./workers/webhook.js";
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: 3 });
+const webhookQueue = createWebhookQueue(config.redisUrl);
 
 const app = express();
 app.use(express.json());
 
 // Public routes (no auth)
 app.use(createHealthRouter(prisma, redis));
-app.use("/api/v1/review-actions", createReviewActionsRouter(prisma));
+app.use("/api/v1/review-actions", createReviewActionsRouter(prisma, webhookQueue));
 
 // Auth middleware for all /api/v1/* routes
 const auth = createAuthMiddleware(prisma);
@@ -30,10 +32,13 @@ app.use("/api/v1", auth);
 // Authenticated routes
 app.use("/api/v1/api-keys", createApiKeyRouter(prisma));
 app.use("/api/v1/policies", createPolicyRouter(prisma));
-app.use("/api/v1/submissions", createSubmissionRouter(prisma));
-app.use("/api/v1/submissions", createReviewRouter(prisma));
+app.use("/api/v1/submissions", createSubmissionRouter(prisma, webhookQueue));
+app.use("/api/v1/submissions", createReviewRouter(prisma, webhookQueue));
 
 async function start(): Promise<void> {
+  const worker = createWebhookWorker(prisma, config.redisUrl);
+  console.log(`Webhook worker started (queue: ${worker.name})`);
+
   app.listen(config.port, () => {
     console.log(`Greenlight API listening on port ${config.port}`);
   });
