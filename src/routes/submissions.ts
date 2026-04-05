@@ -41,6 +41,11 @@ export function createSubmissionRouter(prisma: PrismaClient): Router {
       return;
     }
 
+    if (metadata !== undefined && (typeof metadata !== "object" || Array.isArray(metadata))) {
+      res.status(400).json({ error: "bad_request", message: "metadata must be a JSON object" });
+      return;
+    }
+
     const apiKeyId = req.apiKey?.id;
     if (!apiKeyId) {
       res.status(401).json({ error: "unauthorized", message: "API key required" });
@@ -50,7 +55,7 @@ export function createSubmissionRouter(prisma: PrismaClient): Router {
     // Run policy evaluation
     const policyResults = await evaluatePolicies(prisma, {
       content: contentStr,
-      metadata: metadata ?? {},
+      metadata: (metadata as Record<string, unknown>) ?? {},
       channel: channel.trim(),
       contentType: content_type.trim(),
     });
@@ -75,31 +80,34 @@ export function createSubmissionRouter(prisma: PrismaClient): Router {
       decidedAt = new Date();
     }
 
-    const submission = await prisma.submission.create({
-      data: {
-        apiKeyId,
-        channel: channel.trim(),
-        contentType: content_type.trim(),
-        content: content as object,
-        metadata: (metadata as object) ?? undefined,
-        status,
-        callbackUrl: callback_url ?? null,
-        decidedAt,
-      },
-    });
-
-    // Store policy evaluation results
-    if (policyResults.length > 0) {
-      await prisma.policyEvaluation.createMany({
-        data: policyResults.map((r) => ({
-          submissionId: submission.id,
-          policyId: r.policyId,
-          result: r.result === "match" ? mapAction(r.action) : ("pass" as const),
-          actionTaken: r.action,
-          details: { detail: r.detail },
-        })),
+    const submission = await prisma.$transaction(async (tx) => {
+      const sub = await tx.submission.create({
+        data: {
+          apiKeyId,
+          channel: channel.trim(),
+          contentType: content_type.trim(),
+          content: content as object,
+          metadata: (metadata as object) ?? undefined,
+          status,
+          callbackUrl: callback_url ?? null,
+          decidedAt,
+        },
       });
-    }
+
+      if (policyResults.length > 0) {
+        await tx.policyEvaluation.createMany({
+          data: policyResults.map((r) => ({
+            submissionId: sub.id,
+            policyId: r.policyId,
+            result: r.result === "match" ? mapAction(r.action) : ("pass" as const),
+            actionTaken: r.action,
+            details: { detail: r.detail },
+          })),
+        });
+      }
+
+      return sub;
+    });
 
     const response: Record<string, unknown> = {
       id: submission.id,

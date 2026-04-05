@@ -5,7 +5,7 @@ import { createSubmissionRouter } from "./submissions.js";
 
 const UUID = "00000000-0000-0000-0000-000000000001";
 
-function buildApp(mockPrisma: Record<string, Record<string, unknown>>) {
+function buildApp(mockPrisma: Record<string, unknown>) {
   const prisma = mockPrisma as unknown as Parameters<typeof createSubmissionRouter>[0];
   const app = express();
   app.use(express.json());
@@ -18,24 +18,30 @@ function buildApp(mockPrisma: Record<string, Record<string, unknown>>) {
   return app;
 }
 
-const baseMocks = () => ({
-  policy: {
-    findMany: vi.fn().mockResolvedValue([]),
-  },
-  policyEvaluation: {
-    createMany: vi.fn().mockResolvedValue({ count: 0 }),
-  },
-  submission: {
-    create: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
-      id: UUID,
-      ...data,
-      createdAt: new Date("2026-01-01"),
-    })),
-    findMany: vi.fn().mockResolvedValue([]),
-    findUnique: vi.fn().mockResolvedValue(null),
-    count: vi.fn().mockResolvedValue(0),
-  },
-});
+const baseMocks = () => {
+  const mocks = {
+    policy: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    policyEvaluation: {
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    submission: {
+      create: vi.fn().mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({
+        id: UUID,
+        ...data,
+        createdAt: new Date("2026-01-01"),
+      })),
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
+      count: vi.fn().mockResolvedValue(0),
+    },
+    $transaction: vi
+      .fn()
+      .mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(mocks)),
+  };
+  return mocks;
+};
 
 describe("POST /api/v1/submissions", () => {
   it("auto-approves when no policies match", async () => {
@@ -237,6 +243,19 @@ describe("POST /api/v1/submissions", () => {
       content: "",
     });
     expect(res.status).toBe(422);
+  });
+
+  it("returns 400 for non-object metadata", async () => {
+    const mocks = baseMocks();
+    const app = buildApp(mocks);
+    const res = await request(app).post("/api/v1/submissions").send({
+      channel: "email",
+      content_type: "text/plain",
+      content: "hello",
+      metadata: "not-an-object",
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain("metadata");
   });
 
   it("passes metadata to policy engine", async () => {
