@@ -9,7 +9,7 @@ import { createAuthMiddleware } from "./middleware/auth.js";
 import { createApiKeyRouter } from "./routes/api-keys.js";
 import { createPolicyRouter } from "./routes/policies.js";
 import { createSubmissionRouter } from "./routes/submissions.js";
-import { createReviewRouter } from "./routes/reviews.js";
+import { createReviewRouter, createReviewActionsRouter } from "./routes/reviews.js";
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl });
 const adapter = new PrismaPg(pool);
@@ -21,6 +21,7 @@ app.use(express.json());
 
 // Public routes (no auth)
 app.use(createHealthRouter(prisma, redis));
+app.use("/api/v1/review-actions", createReviewActionsRouter(prisma));
 
 // Auth middleware for all /api/v1/* routes
 const auth = createAuthMiddleware(prisma);

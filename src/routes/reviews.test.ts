@@ -1,15 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
 import request from "supertest";
-import { createReviewRouter, actionTokens } from "./reviews.js";
+import { createReviewRouter, createReviewActionsRouter, actionTokens } from "./reviews.js";
 
 const UUID = "00000000-0000-0000-0000-000000000001";
 const UUID2 = "00000000-0000-0000-0000-000000000002";
 
-function buildApp(mockPrisma: Record<string, Record<string, unknown>>) {
+function buildApp(mockPrisma: Record<string, unknown>) {
   const prisma = mockPrisma as unknown as Parameters<typeof createReviewRouter>[0];
   const app = express();
   app.use(express.json());
+  // Public route (no auth)
+  app.use("/api/v1/review-actions", createReviewActionsRouter(prisma));
+  // Authenticated routes
   app.use((_req, _res, next) => {
     _req.apiKey = { id: "api-key-1", name: "test-reviewer" };
     next();
@@ -23,6 +26,13 @@ const pendingSubmission = (reviews: Record<string, unknown>[] = []) => ({
   status: "pending",
   reviews,
 });
+
+function withTransaction(mocks: Record<string, unknown>): Record<string, unknown> {
+  mocks.$transaction = vi
+    .fn()
+    .mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(mocks));
+  return mocks;
+}
 
 beforeEach(() => {
   actionTokens.clear();
@@ -47,7 +57,7 @@ describe("POST /api/v1/submissions/:id/review", () => {
       },
       review: { create: createFn },
     };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app)
       .post(`/api/v1/submissions/${UUID}/review`)
       .send({ decision: "approved", comment: "Looks good" });
@@ -82,7 +92,7 @@ describe("POST /api/v1/submissions/:id/review", () => {
       },
       review: { create: createFn },
     };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app)
       .post(`/api/v1/submissions/${UUID}/review`)
       .send({ decision: "rejected", comment: "Not appropriate" });
@@ -107,7 +117,7 @@ describe("POST /api/v1/submissions/:id/review", () => {
       },
       review: {},
     };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app)
       .post(`/api/v1/submissions/${UUID}/review`)
       .send({ decision: "rejected" });
@@ -137,7 +147,7 @@ describe("POST /api/v1/submissions/:id/review", () => {
       },
       review: { create: createFn },
     };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app)
       .post(`/api/v1/submissions/${UUID}/review`)
       .send({ decision: "approved", reviewer_type: "ai", confidence: 0.95 });
@@ -157,7 +167,7 @@ describe("POST /api/v1/submissions/:id/review", () => {
       },
       review: {},
     };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app)
       .post(`/api/v1/submissions/${UUID}/review`)
       .send({ decision: "approved", reviewer_type: "ai" });
@@ -171,7 +181,7 @@ describe("POST /api/v1/submissions/:id/review", () => {
       submission: {},
       review: {},
     };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app)
       .post(`/api/v1/submissions/${UUID}/review`)
       .send({ decision: "escalated", reviewer_type: "human" });
@@ -197,7 +207,7 @@ describe("POST /api/v1/submissions/:id/review", () => {
       },
       review: { create: createFn },
     };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app)
       .post(`/api/v1/submissions/${UUID}/review`)
       .send({ decision: "escalated", reviewer_type: "ai", reasoning: "Unsure about content" });
@@ -213,7 +223,7 @@ describe("POST /api/v1/submissions/:id/review", () => {
       submission: { findUnique: vi.fn().mockResolvedValue(null) },
       review: {},
     };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app)
       .post(`/api/v1/submissions/${UUID}/review`)
       .send({ decision: "approved" });
@@ -223,7 +233,7 @@ describe("POST /api/v1/submissions/:id/review", () => {
 
   it("returns 400 for invalid UUID", async () => {
     const mocks = { submission: {}, review: {} };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app)
       .post("/api/v1/submissions/bad-id/review")
       .send({ decision: "approved" });
@@ -233,7 +243,7 @@ describe("POST /api/v1/submissions/:id/review", () => {
 
   it("returns 400 for invalid decision", async () => {
     const mocks = { submission: {}, review: {} };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app)
       .post(`/api/v1/submissions/${UUID}/review`)
       .send({ decision: "maybe" });
@@ -244,7 +254,7 @@ describe("POST /api/v1/submissions/:id/review", () => {
 
   it("returns 400 for invalid reviewer_type", async () => {
     const mocks = { submission: {}, review: {} };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app)
       .post(`/api/v1/submissions/${UUID}/review`)
       .send({ decision: "approved", reviewer_type: "bot" });
@@ -260,7 +270,7 @@ describe("POST /api/v1/submissions/:id/review-tokens", () => {
       submission: { findUnique: vi.fn().mockResolvedValue({ id: UUID, status: "pending" }) },
       review: {},
     };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app).post(`/api/v1/submissions/${UUID}/review-tokens`);
 
     expect(res.status).toBe(201);
@@ -276,7 +286,7 @@ describe("POST /api/v1/submissions/:id/review-tokens", () => {
       submission: { findUnique: vi.fn().mockResolvedValue({ id: UUID, status: "approved" }) },
       review: {},
     };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app).post(`/api/v1/submissions/${UUID}/review-tokens`);
 
     expect(res.status).toBe(409);
@@ -287,14 +297,14 @@ describe("POST /api/v1/submissions/:id/review-tokens", () => {
       submission: { findUnique: vi.fn().mockResolvedValue(null) },
       review: {},
     };
-    const app = buildApp(mocks);
+    const app = buildApp(withTransaction(mocks));
     const res = await request(app).post(`/api/v1/submissions/${UUID}/review-tokens`);
 
     expect(res.status).toBe(404);
   });
 });
 
-describe("POST /api/v1/submissions/review-actions/:token", () => {
+describe("POST /api/v1/review-actions/:token", () => {
   it("uses a valid approve token", async () => {
     const token = "valid-approve-token-abc123";
     actionTokens.set(token, {
@@ -316,8 +326,8 @@ describe("POST /api/v1/submissions/review-actions/:token", () => {
       },
       review: { create: createFn },
     };
-    const app = buildApp(mocks);
-    const res = await request(app).post(`/api/v1/submissions/review-actions/${token}`);
+    const app = buildApp(withTransaction(mocks));
+    const res = await request(app).post(`/api/v1/review-actions/${token}`);
 
     expect(res.status).toBe(201);
     expect(res.body.decision).toBe("approved");
@@ -327,8 +337,8 @@ describe("POST /api/v1/submissions/review-actions/:token", () => {
 
   it("returns 404 for unknown token", async () => {
     const mocks = { submission: {}, review: {} };
-    const app = buildApp(mocks);
-    const res = await request(app).post("/api/v1/submissions/review-actions/unknown-token");
+    const app = buildApp(withTransaction(mocks));
+    const res = await request(app).post("/api/v1/review-actions/unknown-token");
 
     expect(res.status).toBe(404);
   });
@@ -342,8 +352,8 @@ describe("POST /api/v1/submissions/review-actions/:token", () => {
     });
 
     const mocks = { submission: {}, review: {} };
-    const app = buildApp(mocks);
-    const res = await request(app).post(`/api/v1/submissions/review-actions/${token}`);
+    const app = buildApp(withTransaction(mocks));
+    const res = await request(app).post(`/api/v1/review-actions/${token}`);
 
     expect(res.status).toBe(410);
     expect(actionTokens.has(token)).toBe(false);
@@ -367,8 +377,8 @@ describe("POST /api/v1/submissions/review-actions/:token", () => {
       },
       review: {},
     };
-    const app = buildApp(mocks);
-    const res = await request(app).post(`/api/v1/submissions/review-actions/${token}`);
+    const app = buildApp(withTransaction(mocks));
+    const res = await request(app).post(`/api/v1/review-actions/${token}`);
 
     expect(res.status).toBe(409);
   });

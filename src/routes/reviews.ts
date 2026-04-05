@@ -82,29 +82,32 @@ export function createReviewRouter(prisma: PrismaClient): Router {
 
     const reviewerIdentity = req.apiKey?.name ?? "unknown";
 
-    const review = await prisma.review.create({
-      data: {
-        submissionId: id,
-        reviewerType: reviewerType as "human" | "ai",
-        reviewerIdentity: reviewerIdentity,
-        decision: decision as "approved" | "rejected" | "escalated",
-        comment: comment ?? null,
-        confidence: confidence ?? null,
-        reasoning: reasoning ?? null,
-        aiMetadata: ai_metadata ? (ai_metadata as object) : undefined,
-      },
-    });
-
-    // Update submission status for non-escalated decisions
-    if (decision === "approved" || decision === "rejected") {
-      await prisma.submission.update({
-        where: { id },
+    const review = await prisma.$transaction(async (tx) => {
+      const rev = await tx.review.create({
         data: {
-          status: decision as "approved" | "rejected",
-          decidedAt: new Date(),
+          submissionId: id,
+          reviewerType: reviewerType as "human" | "ai",
+          reviewerIdentity: reviewerIdentity,
+          decision: decision as "approved" | "rejected" | "escalated",
+          comment: comment ?? null,
+          confidence: confidence ?? null,
+          reasoning: reasoning ?? null,
+          aiMetadata: ai_metadata ? (ai_metadata as object) : undefined,
         },
       });
-    }
+
+      if (decision === "approved" || decision === "rejected") {
+        await tx.submission.update({
+          where: { id },
+          data: {
+            status: decision as "approved" | "rejected",
+            decidedAt: new Date(),
+          },
+        });
+      }
+
+      return rev;
+    });
 
     res.status(201).json({
       id: review.id,
@@ -153,8 +156,14 @@ export function createReviewRouter(prisma: PrismaClient): Router {
     });
   });
 
-  // POST /api/v1/review-actions/:token — use a single-use review token
-  router.post("/review-actions/:token", async (req, res) => {
+  return router;
+}
+
+/** Public router for token-based review actions (no auth required) */
+export function createReviewActionsRouter(prisma: PrismaClient): Router {
+  const router = Router();
+
+  router.post("/:token", async (req, res) => {
     const { token } = req.params;
 
     const action = actionTokens.get(token);
@@ -169,21 +178,20 @@ export function createReviewRouter(prisma: PrismaClient): Router {
       return;
     }
 
-    // Consume the token
-    actionTokens.delete(token);
-
     const submission = await prisma.submission.findUnique({
       where: { id: action.submissionId },
       include: { reviews: true },
     });
 
     if (!submission) {
+      actionTokens.delete(token);
       res.status(404).json({ error: "not_found", message: "Submission not found" });
       return;
     }
 
     const existingHumanReview = submission.reviews.find((r) => r.reviewerType === "human");
     if (existingHumanReview) {
+      actionTokens.delete(token);
       res.status(409).json({
         error: "conflict",
         message: "Submission already has a human review",
@@ -191,23 +199,29 @@ export function createReviewRouter(prisma: PrismaClient): Router {
       return;
     }
 
-    const review = await prisma.review.create({
-      data: {
-        submissionId: action.submissionId,
-        reviewerType: "human",
-        reviewerIdentity: "token-review",
-        decision: action.decision,
-        comment: null,
-      },
+    const review = await prisma.$transaction(async (tx) => {
+      const rev = await tx.review.create({
+        data: {
+          submissionId: action.submissionId,
+          reviewerType: "human",
+          reviewerIdentity: "token-review",
+          decision: action.decision,
+          comment: null,
+        },
+      });
+
+      await tx.submission.update({
+        where: { id: action.submissionId },
+        data: {
+          status: action.decision,
+          decidedAt: new Date(),
+        },
+      });
+
+      return rev;
     });
 
-    await prisma.submission.update({
-      where: { id: action.submissionId },
-      data: {
-        status: action.decision,
-        decidedAt: new Date(),
-      },
-    });
+    actionTokens.delete(token);
 
     res.status(201).json({
       id: review.id,
