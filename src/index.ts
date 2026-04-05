@@ -20,6 +20,7 @@ import { createWebhookQueue, createWebhookWorker } from "./workers/webhook.js";
 import { createAIReviewQueue, createAIReviewWorker } from "./workers/ai-review.js";
 import { createNotificationQueue, createNotificationWorker } from "./workers/notification.js";
 import { createEscalationWorker } from "./workers/escalation.js";
+import { createReviewUIRouter } from "./routes/review-ui.js";
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl });
 const adapter = new PrismaPg(pool);
@@ -35,6 +36,7 @@ app.use(express.json());
 // Public routes (no auth)
 app.use(createHealthRouter(prisma, redis));
 app.use("/api/v1/review-actions", createReviewActionsRouter(prisma, webhookQueue));
+app.use("/review", createReviewUIRouter(prisma, webhookQueue));
 
 // Auth middleware for all /api/v1/* routes
 const auth = createAuthMiddleware(prisma);

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> — Greenlight</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; color: #1a1a1a; line-height: 1.5; }
+    a { color: #2563eb; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .header { background: #1a1a1a; color: #fff; padding: 12px 16px; display: flex; align-items: center; gap: 12px; }
+    .header h1 { font-size: 18px; font-weight: 600; }
+    .badge { background: #ef4444; color: #fff; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 12px; }
+
+    .container { max-width: 960px; margin: 0 auto; padding: 16px; }
+
+    .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; align-items: center; }
+    .filters select, .filters button { padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; background: #fff; }
+    .filters button { background: #2563eb; color: #fff; border-color: #2563eb; cursor: pointer; }
+
+    .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; }
+    .card.urgent { border-left: 4px solid #ef4444; }
+    .card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+    .card-meta { font-size: 13px; color: #6b7280; }
+    .card-content { margin: 8px 0; font-size: 14px; word-break: break-word; }
+    .card-flags { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+    .flag { display: inline-block; font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+    .flag-block { background: #fef2f2; color: #dc2626; }
+    .flag-flag { background: #fefce8; color: #ca8a04; }
+    .flag-pass { background: #f0fdf4; color: #16a34a; }
+    .flag-fail { background: #fef2f2; color: #dc2626; }
+
+    .actions { display: flex; gap: 8px; margin-top: 8px; }
+    .btn { padding: 6px 16px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn-approve { background: #16a34a; color: #fff; }
+    .btn-approve:hover { background: #15803d; }
+    .btn-reject { background: #dc2626; color: #fff; }
+    .btn-reject:hover { background: #b91c1c; }
+    .btn-back { background: #e5e7eb; color: #1a1a1a; }
+
+    .detail-section { margin-bottom: 16px; }
+    .detail-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+    .detail-content { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; font-size: 14px; word-break: break-word; white-space: pre-wrap; overflow-x: auto; max-width: 100%; }
+    .detail-table { width: 100%; font-size: 14px; border-collapse: collapse; }
+    .detail-table td { padding: 4px 8px; border-bottom: 1px solid #f3f4f6; vertical-align: top; }
+    .detail-table td:first-child { font-weight: 600; white-space: nowrap; width: 140px; color: #6b7280; }
+
+    textarea.review-form { width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; resize: vertical; min-height: 60px; }
+
+    .empty { text-align: center; padding: 40px 16px; color: #6b7280; }
+
+    .status-badge { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+    .status-pending { background: #fef3c7; color: #92400e; }
+    .status-approved { background: #dcfce7; color: #166534; }
+    .status-rejected { background: #fee2e2; color: #991b1b; }
+
+    @media (max-width: 480px) {
+      .card-header { flex-direction: column; }
+      .actions { flex-direction: column; }
+      .btn { width: 100%; text-align: center; }
+      .detail-table td:first-child { width: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1><a href="/review<%= token ? '?token=' + token : '' %>" style="color:#fff;text-decoration:none">Greenlight</a></h1>
+    <% if (typeof pendingCount !== 'undefined' && pendingCount > 0) { %>
+      <span class="badge"><%= pendingCount %> pending</span>
+    <% } %>
+  </div>
+  <div class="container">
+    <%- body %>
+  </div>
+</body>
+</html>
