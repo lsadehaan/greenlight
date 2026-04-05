@@ -23,6 +23,8 @@ import { createAIReviewQueue, createAIReviewWorker } from "./workers/ai-review.j
 import { createNotificationQueue, createNotificationWorker } from "./workers/notification.js";
 import { createEscalationWorker } from "./workers/escalation.js";
 import { createReviewUIRouter } from "./routes/review-ui.js";
+import swaggerUi from "swagger-ui-express";
+import { openapiSpec } from "./openapi.js";
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl });
 const adapter = new PrismaPg(pool);
@@ -40,6 +42,8 @@ app.use(createHealthRouter(prisma, redis));
 app.use("/api/v1/review-actions", createReviewActionsRouter(prisma, webhookQueue));
 app.use("/review", createReviewUIRouter(prisma, webhookQueue));
 app.use("/dashboard", createDashboardRouter(prisma));
+app.get("/api/docs/openapi.json", (_req, res) => res.json(openapiSpec));
+app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));
 
 // Auth middleware for all /api/v1/* routes
 const auth = createAuthMiddleware(prisma);
