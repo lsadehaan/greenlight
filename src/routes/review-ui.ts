@@ -24,14 +24,6 @@ function timeAgo(date: Date): string {
   return `${days}d ago`;
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function contentPreview(content: unknown, maxLen = 200): string {
   const text = typeof content === "string" ? content : JSON.stringify(content);
   return text.length > maxLen ? text.slice(0, maxLen) + "..." : text;
@@ -120,7 +112,7 @@ export function createReviewUIRouter(
       return {
         id: sub.id,
         channel: sub.channel,
-        preview: escapeHtml(contentPreview(sub.content)),
+        preview: contentPreview(sub.content),
         timeAgo: timeAgo(sub.createdAt),
         flags,
         isUrgent,
