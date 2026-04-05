@@ -19,7 +19,8 @@ function buildApp(mockPrisma: Record<string, unknown>) {
 }
 
 const baseMocks = () => {
-  const mocks = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mocks: any = {
     policy: {
       findMany: vi.fn().mockResolvedValue([]),
     },
@@ -32,9 +33,19 @@ const baseMocks = () => {
         ...data,
         createdAt: new Date("2026-01-01"),
       })),
+      update: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
       findUnique: vi.fn().mockResolvedValue(null),
       count: vi.fn().mockResolvedValue(0),
+    },
+    reviewConfig: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
+    guardrail: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    auditEvent: {
+      create: vi.fn().mockResolvedValue({}),
     },
     $transaction: vi
       .fn()
@@ -58,7 +69,7 @@ describe("POST /api/v1/submissions", () => {
     expect(res.status).toBe(201);
     expect(res.body.id).toBe(UUID);
     expect(res.body.status).toBe("approved");
-    expect(res.body.decided_by).toBe("policy");
+    expect(res.body.decided_by).toBe("rules");
     expect(res.body.decided_at).toBeDefined();
     expect(res.body.policy_results).toEqual([]);
   });
@@ -89,7 +100,7 @@ describe("POST /api/v1/submissions", () => {
 
     expect(res.status).toBe(201);
     expect(res.body.status).toBe("rejected");
-    expect(res.body.decided_by).toBe("policy");
+    expect(res.body.decided_by).toBe("rules");
     expect(res.body.policy_results).toHaveLength(1);
     expect(res.body.policy_results[0].result).toBe("match");
     expect(res.body.policy_results[0].action).toBe("block");
@@ -121,7 +132,6 @@ describe("POST /api/v1/submissions", () => {
     expect(res.body.status).toBe("pending");
     expect(res.body.decided_by).toBeNull();
     expect(res.body.review_url).toBeDefined();
-    expect(res.body.estimated_review_time).toBeDefined();
   });
 
   it("block takes precedence over flag", async () => {

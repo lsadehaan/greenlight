@@ -109,6 +109,7 @@ export function createReviewRouter(
           data: {
             status: decision as "approved" | "rejected",
             decidedAt: new Date(),
+            decidedBy: reviewerType,
           },
         });
       }
@@ -270,6 +271,7 @@ export function createReviewActionsRouter(
         data: {
           status: action.decision,
           decidedAt: new Date(),
+          decidedBy: "human",
         },
       });
 

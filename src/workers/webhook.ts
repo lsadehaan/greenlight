@@ -18,6 +18,7 @@ export interface WebhookJobData {
       result: string;
       action: string;
     }>;
+    decided_by?: string;
     decided_at: string;
     timestamp: string;
   };
