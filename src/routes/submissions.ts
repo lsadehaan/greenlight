@@ -4,6 +4,7 @@ import type { PrismaClient } from "../generated/prisma/client.js";
 import { evaluatePolicies } from "../engine/policy.js";
 import type { WebhookJobData } from "../workers/webhook.js";
 import { enqueueWebhook } from "../workers/webhook.js";
+import { recordAuditEvent } from "../services/audit.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -138,6 +139,55 @@ export function createSubmissionRouter(
       } catch (err) {
         console.error(`Failed to enqueue webhook for submission ${submission.id}:`, err);
       }
+    }
+
+    // Record audit events (best-effort)
+    try {
+      const autoEvent =
+        status === "approved"
+          ? "submission.auto_approved"
+          : status === "rejected"
+            ? "submission.auto_rejected"
+            : undefined;
+
+      await recordAuditEvent(prisma, {
+        eventType: "submission.created",
+        submissionId: submission.id,
+        actor: req.apiKey?.name ?? "unknown",
+        actorType: "system",
+        payload: {
+          channel: channel.trim(),
+          content_type: content_type.trim(),
+          status,
+        },
+      });
+
+      for (const r of policyResults) {
+        await recordAuditEvent(prisma, {
+          eventType: "policy.evaluated",
+          submissionId: submission.id,
+          actor: r.policyName,
+          actorType: "system",
+          payload: {
+            policy_name: r.policyName,
+            result: r.result,
+            action: r.action,
+            detail: r.detail,
+          },
+        });
+      }
+
+      if (autoEvent) {
+        await recordAuditEvent(prisma, {
+          eventType: autoEvent,
+          submissionId: submission.id,
+          actor: "policy",
+          actorType: "system",
+          payload: { decision: status },
+        });
+      }
+    } catch {
+      // Best-effort audit recording
     }
 
     const response: Record<string, unknown> = {

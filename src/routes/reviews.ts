@@ -4,6 +4,7 @@ import type { Queue } from "bullmq";
 import type { PrismaClient } from "../generated/prisma/client.js";
 import type { WebhookJobData } from "../workers/webhook.js";
 import { enqueueWebhook } from "../workers/webhook.js";
+import { recordAuditEvent } from "../services/audit.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const VALID_DECISIONS = ["approved", "rejected", "escalated"] as const;
@@ -139,6 +140,25 @@ export function createReviewRouter(
       } catch (err) {
         console.error(`Failed to enqueue webhook for submission ${id}:`, err);
       }
+    }
+
+    // Record audit event (best-effort)
+    try {
+      const eventType = decision === "escalated" ? "review.escalated" : "review.created";
+      await recordAuditEvent(prisma, {
+        eventType,
+        submissionId: id,
+        actor: reviewerIdentity,
+        actorType: reviewerType as "human" | "ai",
+        payload: {
+          decision,
+          reviewer_type: reviewerType,
+          reviewer_identity: reviewerIdentity,
+          comment: review.comment,
+        },
+      });
+    } catch {
+      // Best-effort audit recording
     }
 
     res.status(201).json({
@@ -278,6 +298,19 @@ export function createReviewActionsRouter(
       } catch (err) {
         console.error(`Failed to enqueue webhook for submission ${action.submissionId}:`, err);
       }
+    }
+
+    // Record audit event (best-effort)
+    try {
+      await recordAuditEvent(prisma, {
+        eventType: "review.created",
+        submissionId: action.submissionId,
+        actor: "token-review",
+        actorType: "human",
+        payload: { decision: action.decision },
+      });
+    } catch {
+      // Best-effort audit recording
     }
 
     res.status(201).json({
