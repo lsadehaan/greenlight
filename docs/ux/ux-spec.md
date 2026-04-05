@@ -2,7 +2,7 @@
 
 ## User Flows
 
-### Flow 1: Content Submission (Developer / Automated System) -- REQ-001, REQ-002, REQ-013, REQ-014, REQ-015
+### Flow 1: Content Submission (Developer / Automated System) -- REQ-001, REQ-002, REQ-012 (escalation), REQ-013, REQ-014, REQ-015
 
 ```mermaid
 flowchart TD
@@ -126,7 +126,11 @@ flowchart TD
   <div style="padding:16px">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
       <h2 style="margin:0">Pending Reviews <span style="background:#ff6b6b; color:white; padding:2px 8px; border-radius:12px; font-size:14px">3</span></h2>
-      <select style="padding:6px 12px; border:1px solid #ddd; border-radius:4px"><option>All channels</option></select>
+      <div style="display:flex; gap:8px">
+        <select style="padding:6px 12px; border:1px solid #ddd; border-radius:4px"><option>All channels</option></select>
+        <select style="padding:6px 12px; border:1px solid #ddd; border-radius:4px"><option>All priorities</option></select>
+        <select style="padding:6px 12px; border:1px solid #ddd; border-radius:4px"><option>Newest first</option></select>
+      </div>
     </div>
     <div style="border:1px solid #ffd43b; background:#fff9db; padding:12px; border-radius:8px; margin-bottom:12px">
       <div style="display:flex; justify-content:space-between; align-items:flex-start">
@@ -175,7 +179,7 @@ flowchart TD
 
 ### Screen 2: Submission Detail
 
-**Satisfies:** REQ-008, REQ-009, REQ-013 (AI review display), REQ-014 (guardrail results display), REQ-015 (tiered results)
+**Satisfies:** REQ-008, REQ-009, REQ-011 (audit trail), REQ-013 (AI review display), REQ-014 (guardrail results display), REQ-015 (tiered results)
 **Purpose:** Full view of a single submission with content, policy results, and review controls. Accessed by clicking a submission card.
 **Entry points:** Click submission card in Review Queue, direct link from notification
 **Key elements:**
@@ -264,11 +268,39 @@ We are excited to announce our Q2 product launch with guaranteed returns on your
       </div>
       <div style="color:#495057; font-size:13px">Content appears promotional and may contain financial claims. AI is not confident enough to auto-approve. Escalated for human review.</div>
     </div>
+    <h3 style="margin:0 0 8px">Metadata</h3>
+    <table style="width:100%; border-collapse:collapse; margin-bottom:16px">
+      <tr style="background:#f5f5f5">
+        <th style="text-align:left; padding:8px; border-bottom:1px solid #ddd; width:30%">Key</th>
+        <th style="text-align:left; padding:8px; border-bottom:1px solid #ddd">Value</th>
+      </tr>
+      <tr>
+        <td style="padding:8px; border-bottom:1px solid #eee; color:#666">channel</td>
+        <td style="padding:8px; border-bottom:1px solid #eee">email</td>
+      </tr>
+      <tr>
+        <td style="padding:8px; border-bottom:1px solid #eee; color:#666">recipient</td>
+        <td style="padding:8px; border-bottom:1px solid #eee">customer-list-q2</td>
+      </tr>
+      <tr>
+        <td style="padding:8px; border-bottom:1px solid #eee; color:#666">campaign_id</td>
+        <td style="padding:8px; border-bottom:1px solid #eee">camp-2026-q2-launch</td>
+      </tr>
+    </table>
     <h3 style="margin:0 0 8px">Your Review</h3>
     <textarea style="width:100%; height:60px; border:1px solid #ddd; border-radius:4px; padding:8px; font-size:14px; box-sizing:border-box; margin-bottom:12px" placeholder="Optional comment..."></textarea>
-    <div style="display:flex; gap:12px">
+    <div style="display:flex; gap:12px; margin-bottom:24px">
       <button style="background:#51cf66; color:white; border:none; padding:10px 24px; border-radius:4px; cursor:pointer; font-size:14px; font-weight:bold">Approve</button>
       <button style="background:#ff6b6b; color:white; border:none; padding:10px 24px; border-radius:4px; cursor:pointer; font-size:14px; font-weight:bold">Reject</button>
+    </div>
+    <h3 style="margin:0 0 8px">Audit Trail</h3>
+    <div style="font-size:13px; color:#495057">
+      <div style="padding:6px 0; border-bottom:1px solid #eee"><span style="color:#868e96">5 min ago</span> &middot; <b>system</b> &middot; Submission created</div>
+      <div style="padding:6px 0; border-bottom:1px solid #eee"><span style="color:#868e96">5 min ago</span> &middot; <b>system</b> &middot; Policy evaluation: keyword_blocklist FLAG, content_length PASS, required_fields PASS</div>
+      <div style="padding:6px 0; border-bottom:1px solid #eee"><span style="color:#868e96">4 min ago</span> &middot; <b>guardrail</b> &middot; Content Safety (Llama Guard): PASS (0.97)</div>
+      <div style="padding:6px 0; border-bottom:1px solid #eee"><span style="color:#868e96">4 min ago</span> &middot; <b>guardrail</b> &middot; PII Scanner (Guardrails AI): FLAG (0.72)</div>
+      <div style="padding:6px 0; border-bottom:1px solid #eee"><span style="color:#868e96">3 min ago</span> &middot; <b>ai</b> &middot; AI review: ESCALATED (confidence 0.62, threshold 0.80)</div>
+      <div style="padding:6px 0"><span style="color:#868e96">3 min ago</span> &middot; <b>system</b> &middot; Notification sent to reviewers via Slack</div>
     </div>
   </div>
 </div>
@@ -277,14 +309,15 @@ We are excited to announce our Q2 product launch with guaranteed returns on your
 
 ### Screen 3: Analytics Dashboard
 
-**Satisfies:** REQ-004 (visual), REQ-005 (feedback display), REQ-010
+**Satisfies:** REQ-004 (visual), REQ-005 (feedback display), REQ-010, REQ-015 (tier funnel)
 **Purpose:** Read-only dashboard showing approval metrics and trends. For operations/compliance monitoring.
 **Entry points:** Navigate to `/dashboard` from nav
 **Key elements:**
 - Summary metric cards: total submissions (period), approval rate, avg review time, SLA compliance
 - Submissions volume chart (bar chart, daily)
 - Top rejection reasons (horizontal bar chart)
-- Channel breakdown (pie/donut chart)
+- Channel breakdown (horizontal bars with counts and percentages)
+- Review tier funnel (how many submissions each tier handles)
 - Feedback summary (positive/negative/neutral counts)
 - Time range selector (24h / 7d / 30d / custom)
 
@@ -347,6 +380,34 @@ We are excited to announce our Q2 product launch with guaranteed returns on your
         </div>
       </div>
     </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:24px">
+      <div style="border:1px solid #ddd; padding:16px; border-radius:8px">
+        <h3 style="margin:0 0 12px; font-size:15px">Channel Breakdown</h3>
+        <div style="font-size:13px">
+          <div style="display:flex; justify-content:space-between; margin-bottom:6px"><span>email</span><span style="font-weight:bold">523 (42%)</span></div>
+          <div style="background:#339af0; height:8px; width:42%; border-radius:4px; margin-bottom:8px"></div>
+          <div style="display:flex; justify-content:space-between; margin-bottom:6px"><span>slack</span><span style="font-weight:bold">412 (33%)</span></div>
+          <div style="background:#51cf66; height:8px; width:33%; border-radius:4px; margin-bottom:8px"></div>
+          <div style="display:flex; justify-content:space-between; margin-bottom:6px"><span>sms</span><span style="font-weight:bold">198 (16%)</span></div>
+          <div style="background:#ffd43b; height:8px; width:16%; border-radius:4px; margin-bottom:8px"></div>
+          <div style="display:flex; justify-content:space-between; margin-bottom:6px"><span>other</span><span style="font-weight:bold">114 (9%)</span></div>
+          <div style="background:#e3e3e3; height:8px; width:9%; border-radius:4px"></div>
+        </div>
+      </div>
+      <div style="border:1px solid #ddd; padding:16px; border-radius:8px">
+        <h3 style="margin:0 0 12px; font-size:15px">Review Tier Funnel</h3>
+        <div style="font-size:13px">
+          <div style="display:flex; justify-content:space-between; margin-bottom:6px"><span>Auto-approved by rules</span><span style="font-weight:bold">998 (80%)</span></div>
+          <div style="background:#51cf66; height:8px; width:80%; border-radius:4px; margin-bottom:8px"></div>
+          <div style="display:flex; justify-content:space-between; margin-bottom:6px"><span>Cleared by guardrails</span><span style="font-weight:bold">62 (5%)</span></div>
+          <div style="background:#339af0; height:8px; width:5%; border-radius:4px; margin-bottom:8px"></div>
+          <div style="display:flex; justify-content:space-between; margin-bottom:6px"><span>Cleared by AI review</span><span style="font-weight:bold">125 (10%)</span></div>
+          <div style="background:#845ef7; height:8px; width:10%; border-radius:4px; margin-bottom:8px"></div>
+          <div style="display:flex; justify-content:space-between; margin-bottom:6px"><span>Decided by human</span><span style="font-weight:bold">62 (5%)</span></div>
+          <div style="background:#ffd43b; height:8px; width:5%; border-radius:4px"></div>
+        </div>
+      </div>
+    </div>
     <div style="border:1px solid #ddd; padding:16px; border-radius:8px">
       <h3 style="margin:0 0 12px; font-size:15px">Post-Delivery Feedback</h3>
       <div style="display:flex; gap:24px; font-size:14px">
@@ -357,6 +418,16 @@ We are excited to announce our Q2 product launch with guaranteed returns on your
     </div>
   </div>
 </div>
+
+## Reviewer Access Model
+
+In v1, Greenlight uses API keys for programmatic access and single-use review tokens for human reviewers:
+
+- **Notification-based access:** When a submission needs human review, Greenlight sends a notification (Slack/email) containing a single-use, time-limited review token embedded in the action links. Clicking "Approve" or "Reject" in the notification authenticates the reviewer via that token. Reviewer identity is derived from the notification channel (Slack user ID or email address).
+- **Web UI direct access:** The `/review` and `/dashboard` routes are accessible to anyone with a valid API key passed as a query parameter or cookie. In a self-hosted, single-tenant deployment, network-level access control (VPN, IP allowlist) is the expected mechanism for restricting who can view the web UI. The web UI does not have its own login page in v1.
+- **Reviewer identity on decided items:** Populated from the review token's associated identity (Slack user, email) or the API key name for direct API submissions.
+
+This model avoids building a full user management system while still tracking who approved what. SSO/user accounts are planned for v2.
 
 ## Mobile Considerations
 

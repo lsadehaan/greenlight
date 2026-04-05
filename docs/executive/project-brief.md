@@ -22,10 +22,10 @@ This should be a no-brainer adoption for any SMB or developer who needs an appro
 - **AI-powered review** -- configurable LLM-based content review that can approve, reject, or escalate to human reviewers. Three review modes: `human_only`, `ai_only`, and `ai_then_human` (AI reviews first, escalates when confidence is below a configurable threshold).
 - **Human review flow** -- notifications via Slack and email with one-click approve/reject action links, plus a minimal web UI as fallback
 - **Tiered evaluation pipeline** -- submissions flow through four tiers: (1) rule-based policies, (2) external guardrail pipeline, (3) AI-based review, (4) human review. Each tier can auto-approve, auto-reject, or escalate to the next. Any tier can be disabled. The pipeline short-circuits early to minimize cost and latency.
-- **Analytics API and dashboard** -- the dashboard shows six key views: total submissions, approval rate, average review time, SLA compliance, daily submission volume chart, top rejection reasons, and post-delivery feedback summary (positive/negative/neutral). The API exposes richer data including tier funnel metrics, AI review confidence distribution, and per-guardrail pass/fail stats for programmatic consumers.
+- **Analytics API and dashboard** -- the dashboard shows eight key views: summary metrics (total submissions, approval rate, average review time, SLA compliance), daily submission volume chart, top rejection reasons, channel breakdown, review tier funnel (what percentage each tier handles), and post-delivery feedback summary (positive/negative/neutral). The API exposes the same data plus richer breakdowns including AI review confidence distribution and per-guardrail pass/fail stats for programmatic consumers.
 - **Immutable audit trail** -- every submission, policy evaluation, guardrail verdict, AI review decision, human review decision, and feedback event logged with actor type (human/AI/system/guardrail) for compliance
 - **Webhook callbacks** -- approved/rejected decisions delivered to the originating system with HMAC-signed webhooks and retry logic
-- **Self-hostable** -- single Docker container + PostgreSQL + Redis, deployable in under 10 minutes
+- **Self-hostable** -- ships as a Docker Compose stack (app + PostgreSQL + Redis), deployable in under 10 minutes
 
 ```mermaid
 graph TD
@@ -78,7 +78,11 @@ The review queue is the primary screen for human reviewers. Full wireframes for 
   <div style="padding:16px">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
       <h2 style="margin:0">Pending Reviews <span style="background:#ff6b6b; color:white; padding:2px 8px; border-radius:12px; font-size:14px">3</span></h2>
-      <select style="padding:6px 12px; border:1px solid #ddd; border-radius:4px"><option>All channels</option></select>
+      <div style="display:flex; gap:8px">
+        <select style="padding:6px 12px; border:1px solid #ddd; border-radius:4px"><option>All channels</option></select>
+        <select style="padding:6px 12px; border:1px solid #ddd; border-radius:4px"><option>All priorities</option></select>
+        <select style="padding:6px 12px; border:1px solid #ddd; border-radius:4px"><option>Newest first</option></select>
+      </div>
     </div>
     <div style="border:1px solid #ffd43b; background:#fff9db; padding:12px; border-radius:8px; margin-bottom:12px">
       <div style="display:flex; justify-content:space-between; align-items:flex-start">
