@@ -1,0 +1,43 @@
+<form class="filters" method="get" action="/review">
+  <input type="hidden" name="token" value="<%= token %>">
+  <select name="channel">
+    <option value="">All channels</option>
+    <% channels.forEach(function(ch) { %>
+      <option value="<%= ch %>" <%= channel === ch ? 'selected' : '' %>><%= ch %></option>
+    <% }); %>
+  </select>
+  <select name="sort">
+    <option value="newest" <%= sort === 'newest' ? 'selected' : '' %>>Newest first</option>
+    <option value="oldest" <%= sort === 'oldest' ? 'selected' : '' %>>Oldest first</option>
+  </select>
+  <button type="submit">Filter</button>
+</form>
+
+<% if (submissions.length === 0) { %>
+  <div class="empty">No pending submissions.</div>
+<% } else { %>
+  <% submissions.forEach(function(sub) { %>
+    <div class="card <%= sub.isUrgent ? 'urgent' : '' %>">
+      <div class="card-header">
+        <a href="/review/<%= sub.id %>?token=<%= token %>"><strong><%= sub.id.slice(0, 8) %>...</strong></a>
+        <span class="card-meta"><%= sub.channel %> &middot; <%= sub.timeAgo %></span>
+      </div>
+      <div class="card-content"><%= sub.preview %></div>
+      <% if (sub.flags.length > 0) { %>
+        <div class="card-flags">
+          <% sub.flags.forEach(function(f) { %>
+            <span class="flag flag-<%= f.type %>"><%= f.label %></span>
+          <% }); %>
+        </div>
+      <% } %>
+      <div class="actions">
+        <form method="post" action="/review/<%= sub.id %>/approve?token=<%= token %>" style="display:inline">
+          <button type="submit" class="btn btn-approve">Approve</button>
+        </form>
+        <form method="post" action="/review/<%= sub.id %>/reject?token=<%= token %>" style="display:inline">
+          <button type="submit" class="btn btn-reject">Reject</button>
+        </form>
+      </div>
+    </div>
+  <% }); %>
+<% } %>

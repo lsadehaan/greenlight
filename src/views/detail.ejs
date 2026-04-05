@@ -1,0 +1,92 @@
+<a href="/review?token=<%= token %>" class="btn btn-back" style="margin-bottom:16px;display:inline-block">&larr; Back to queue</a>
+
+<div class="card">
+  <div class="card-header">
+    <div>
+      <strong><%= submission.id %></strong>
+      <span class="status-badge status-<%= submission.status %>"><%= submission.status %></span>
+    </div>
+    <span class="card-meta"><%= submission.channel %> &middot; <%= submission.contentType %> &middot; <%= submission.timeAgo %></span>
+  </div>
+</div>
+
+<div class="detail-section">
+  <h3>Content</h3>
+  <div class="detail-content"><%= submission.contentText %></div>
+</div>
+
+<% if (submission.metadata) { %>
+<div class="detail-section">
+  <h3>Metadata</h3>
+  <div class="detail-content"><%= JSON.stringify(submission.metadata, null, 2) %></div>
+</div>
+<% } %>
+
+<% if (policyResults.length > 0) { %>
+<div class="detail-section">
+  <h3>Policy Results</h3>
+  <% policyResults.forEach(function(p) { %>
+    <div class="card">
+      <span class="flag flag-<%= p.result %>"><%= p.result %></span>
+      <strong><%= p.policyName %></strong> &mdash; action: <%= p.actionTaken %>
+      <% if (p.details) { %><div class="card-meta"><%= JSON.stringify(p.details) %></div><% } %>
+    </div>
+  <% }); %>
+</div>
+<% } %>
+
+<% if (guardrailResults.length > 0) { %>
+<div class="detail-section">
+  <h3>Guardrail Results</h3>
+  <% guardrailResults.forEach(function(g) { %>
+    <div class="card">
+      <span class="flag flag-<%= g.verdict %>"><%= g.verdict %></span>
+      <strong><%= g.guardrailName %></strong>
+      <% if (g.confidence != null) { %> &mdash; confidence: <%= (g.confidence * 100).toFixed(0) %>%<% } %>
+      <% if (g.reasoning) { %><div class="card-meta"><%= g.reasoning %></div><% } %>
+    </div>
+  <% }); %>
+</div>
+<% } %>
+
+<% if (aiReview) { %>
+<div class="detail-section">
+  <h3>AI Review</h3>
+  <div class="card">
+    <span class="status-badge status-<%= aiReview.decision === 'approved' ? 'approved' : aiReview.decision === 'rejected' ? 'rejected' : 'pending' %>"><%= aiReview.decision %></span>
+    <% if (aiReview.confidence != null) { %> &mdash; confidence: <%= (aiReview.confidence * 100).toFixed(0) %>%<% } %>
+    <% if (aiReview.reasoning) { %><div class="card-content"><%= aiReview.reasoning %></div><% } %>
+  </div>
+</div>
+<% } %>
+
+<% if (reviews.length > 0) { %>
+<div class="detail-section">
+  <h3>Reviews</h3>
+  <% reviews.forEach(function(r) { %>
+    <div class="card">
+      <span class="status-badge status-<%= r.decision === 'approved' ? 'approved' : 'rejected' %>"><%= r.decision %></span>
+      <strong><%= r.reviewerType %></strong>
+      <% if (r.reviewerIdentity) { %> (<%= r.reviewerIdentity %>)<% } %>
+      <% if (r.comment) { %><div class="card-content"><%= r.comment %></div><% } %>
+      <div class="card-meta"><%= new Date(r.createdAt).toISOString() %></div>
+    </div>
+  <% }); %>
+</div>
+<% } %>
+
+<% if (submission.status === 'pending') { %>
+<div class="detail-section">
+  <h3>Review</h3>
+  <form method="post" action="/review/<%= submission.id %>/approve?token=<%= token %>" style="margin-bottom:8px">
+    <label for="approve-comment" style="font-size:14px;font-weight:600">Comment (optional)</label>
+    <textarea id="approve-comment" name="comment" class="review-form" placeholder="Optional comment..."></textarea>
+    <button type="submit" class="btn btn-approve" style="margin-top:8px">Approve</button>
+  </form>
+  <form method="post" action="/review/<%= submission.id %>/reject?token=<%= token %>">
+    <label for="reject-comment" style="font-size:14px;font-weight:600">Comment (optional)</label>
+    <textarea id="reject-comment" name="comment" class="review-form" placeholder="Optional comment..."></textarea>
+    <button type="submit" class="btn btn-reject" style="margin-top:8px">Reject</button>
+  </form>
+</div>
+<% } %>
