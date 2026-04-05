@@ -9,12 +9,16 @@ export function hashApiKey(key: string): string {
 export function createAuthMiddleware(prisma: PrismaClient) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const header = req.headers.authorization;
-    if (!header?.startsWith("Bearer ")) {
+    if (!header || !/^bearer\s/i.test(header)) {
       res.status(401).json({ error: "unauthorized", message: "API key required" });
       return;
     }
 
-    const token = header.slice(7);
+    const token = header.replace(/^bearer\s+/i, "");
+    if (!token) {
+      res.status(401).json({ error: "unauthorized", message: "API key required" });
+      return;
+    }
     const keyHash = hashApiKey(token);
 
     const apiKey = await prisma.apiKey.findUnique({ where: { keyHash } });

@@ -78,24 +78,33 @@ describe("DELETE /api/v1/api-keys/:id", () => {
   it("revokes a key", async () => {
     const updateFn = vi.fn().mockResolvedValue({});
     const app = buildApp({
-      findUnique: vi.fn().mockResolvedValue({ id: "1", active: true }),
+      findUnique: vi
+        .fn()
+        .mockResolvedValue({ id: "00000000-0000-0000-0000-000000000001", active: true }),
       update: updateFn,
     });
-    const res = await request(app).delete("/api/v1/api-keys/1");
+    const res = await request(app).delete("/api/v1/api-keys/00000000-0000-0000-0000-000000000001");
     expect(res.status).toBe(204);
     expect(updateFn).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "1" },
+        where: { id: "00000000-0000-0000-0000-000000000001" },
         data: expect.objectContaining({ active: false }),
       }),
     );
+  });
+
+  it("returns 400 when id is not a valid UUID", async () => {
+    const app = buildApp({});
+    const res = await request(app).delete("/api/v1/api-keys/not-a-uuid");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("bad_request");
   });
 
   it("returns 404 when key does not exist", async () => {
     const app = buildApp({
       findUnique: vi.fn().mockResolvedValue(null),
     });
-    const res = await request(app).delete("/api/v1/api-keys/nonexistent");
+    const res = await request(app).delete("/api/v1/api-keys/00000000-0000-0000-0000-000000000099");
     expect(res.status).toBe(404);
   });
 });

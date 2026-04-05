@@ -47,6 +47,11 @@ export function createApiKeyRouter(prisma: PrismaClient): Router {
 
   router.delete("/:id", async (req, res) => {
     const { id } = req.params;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(id)) {
+      res.status(400).json({ error: "bad_request", message: "Invalid API key ID" });
+      return;
+    }
 
     const existing = await prisma.apiKey.findUnique({ where: { id } });
     if (!existing) {

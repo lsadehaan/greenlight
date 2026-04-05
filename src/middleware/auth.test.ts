@@ -69,6 +69,28 @@ describe("auth middleware", () => {
     expect(res.body.apiKey).toEqual({ id: "key-1", name: "test-key" });
   });
 
+  it("accepts lowercase bearer scheme", async () => {
+    const token = "gl_testkey123";
+    const keyHash = hashApiKey(token);
+    const app = buildApp(
+      vi.fn().mockImplementation(async (args: { where: { keyHash: string } }) => {
+        if (args.where.keyHash === keyHash) {
+          return { id: "key-1", name: "test-key", active: true };
+        }
+        return null;
+      }),
+    );
+    const res = await request(app).get("/api/v1/test").set("Authorization", `bearer ${token}`);
+    expect(res.status).toBe(200);
+  });
+
+  it("returns 401 when Bearer token is empty", async () => {
+    const app = buildApp(vi.fn());
+    const res = await request(app).get("/api/v1/test").set("Authorization", "Bearer ");
+    expect(res.status).toBe(401);
+    expect(res.body.message).toBe("API key required");
+  });
+
   it("does not affect non /api/v1 routes", async () => {
     const app = buildApp(vi.fn());
     const res = await request(app).get("/health");
