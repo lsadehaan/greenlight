@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import { createHealthRouter } from "./health.js";
 import { createAuthMiddleware } from "./middleware/auth.js";
 import { createApiKeyRouter } from "./routes/api-keys.js";
+import { createPolicyRouter } from "./routes/policies.js";
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl });
 const adapter = new PrismaPg(pool);
@@ -25,6 +26,7 @@ app.use("/api/v1", auth);
 
 // Authenticated routes
 app.use("/api/v1/api-keys", createApiKeyRouter(prisma));
+app.use("/api/v1/policies", createPolicyRouter(prisma));
 
 async function start(): Promise<void> {
   app.listen(config.port, () => {
