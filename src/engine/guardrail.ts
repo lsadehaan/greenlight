@@ -109,8 +109,20 @@ export async function evaluateGuardrails(
 
     results.push(result);
 
-    // Record audit event (best-effort)
+    // Persist evaluation record and audit event (best-effort)
     try {
+      await prisma.guardrailEvaluation.create({
+        data: {
+          submissionId: input.submissionId,
+          guardrailId: guardrail.id,
+          verdict: result.verdict as "pass" | "fail" | "flag",
+          confidence: result.confidence,
+          reasoning: result.reasoning,
+          categories: result.categories ? (result.categories as unknown as object) : undefined,
+          latencyMs: result.latencyMs,
+        },
+      });
+
       await recordAuditEvent(prisma, {
         eventType: "guardrail.evaluated",
         submissionId: input.submissionId,

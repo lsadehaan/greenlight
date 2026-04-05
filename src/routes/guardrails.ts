@@ -5,6 +5,25 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const VALID_FAILURE_MODES = ["fail_open", "fail_closed"] as const;
 const MAX_TIMEOUT_MS = 30000;
 
+const PRIVATE_IP_RE =
+  /^(127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|0\.|169\.254\.|fc|fd|fe80|::1|localhost)/i;
+
+function validateEndpointUrl(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return "endpoint_url must be a valid URL";
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return "endpoint_url must use http or https";
+  }
+  if (PRIVATE_IP_RE.test(parsed.hostname)) {
+    return "endpoint_url must not point to private/loopback addresses";
+  }
+  return null;
+}
+
 export function createGuardrailRouter(prisma: PrismaClient): Router {
   const router = Router();
 
@@ -34,6 +53,11 @@ export function createGuardrailRouter(prisma: PrismaClient): Router {
     }
     if (!endpoint_url || typeof endpoint_url !== "string") {
       res.status(400).json({ error: "bad_request", message: "endpoint_url is required" });
+      return;
+    }
+    const urlError = validateEndpointUrl(endpoint_url);
+    if (urlError) {
+      res.status(400).json({ error: "bad_request", message: urlError });
       return;
     }
     if (
@@ -72,8 +96,8 @@ export function createGuardrailRouter(prisma: PrismaClient): Router {
         timeoutMs: timeout_ms ?? 10000,
         failureMode: failure_mode as "fail_open" | "fail_closed",
         pipelineOrder: pipeline_order,
-        scopeChannel: scope_channel ?? null,
-        scopeContentType: scope_content_type ?? null,
+        scopeChannel: scope_channel || null,
+        scopeContentType: scope_content_type || null,
       },
     });
 
@@ -141,6 +165,13 @@ export function createGuardrailRouter(prisma: PrismaClient): Router {
       scope_content_type?: string;
     };
 
+    if (endpoint_url) {
+      const updateUrlError = validateEndpointUrl(endpoint_url);
+      if (updateUrlError) {
+        res.status(400).json({ error: "bad_request", message: updateUrlError });
+        return;
+      }
+    }
     if (
       failure_mode &&
       !VALID_FAILURE_MODES.includes(failure_mode as (typeof VALID_FAILURE_MODES)[number])
