@@ -7,21 +7,34 @@
 ```mermaid
 flowchart TD
     A["System produces content"] --> B["POST /api/v1/submissions"]
-    B --> C{"Policy evaluation"}
-    C -->|All pass| D["Auto-approved (sync 201)"]
-    C -->|Flag triggered| E["Pending human review (sync 201)"]
+    B --> C{"Tier 1: Policy evaluation"}
+    C -->|All pass| D{"Guardrail pipeline enabled?"}
+    C -->|Flag triggered| D
     C -->|Block triggered| F["Auto-rejected (sync 201)"]
-    E --> G["Notification sent to reviewer"]
-    G --> H{"Reviewer acts?"}
-    H -->|Yes| I["Decision webhook to callback_url"]
-    H -->|No, SLA expires| J{"Escalation configured?"}
-    J -->|Yes| K["Escalation notification sent"]
-    J -->|No| L["Stays pending, visible in dashboard"]
-    K --> H
-    D --> M["System proceeds with content"]
-    I -->|Approved| M
-    I -->|Rejected| N["System handles rejection"]
-    F --> N
+    D -->|No| G{"Review mode?"}
+    D -->|Yes| E{"Tier 2: Guardrail pipeline"}
+    E -->|All pass| G
+    E -->|Fail (fail_closed)| F
+    E -->|Flag| G
+    G -->|human_only| H["Pending human review (sync 201)"]
+    G -->|ai_only or ai_then_human| I["Pending AI review (sync 201)"]
+    G -->|No review needed (all pass)| J["Auto-approved (sync 201)"]
+    I --> K["BullMQ: AI review job"]
+    K --> L{"AI verdict"}
+    L -->|Approve (high confidence)| M["Decision webhook to callback_url"]
+    L -->|Reject (high confidence)| M
+    L -->|Escalate (low confidence)| H
+    H --> N["Notification sent to reviewer"]
+    N --> O{"Reviewer acts?"}
+    O -->|Yes| M
+    O -->|No, SLA expires| P{"Escalation configured?"}
+    P -->|Yes| Q["Escalation notification sent"]
+    P -->|No| R["Stays pending, visible in dashboard"]
+    Q --> O
+    J --> S["System proceeds with content"]
+    M -->|Approved| S
+    M -->|Rejected| T["System handles rejection"]
+    F --> T
 ```
 
 ### Flow 2: Human Review (Reviewer)
@@ -33,15 +46,17 @@ flowchart TD
     B -->|Email| D["Click approve/reject link in email"]
     B -->|Web UI| E["Open /review, view pending list"]
     E --> F["Click submission to see details"]
-    F --> G["View content + policy flags"]
+    F --> G["View content + policy flags +<br/>guardrail results + AI review verdict (if any)"]
     G --> H{"Decision"}
     C --> H
     D --> H
-    H -->|Approve| I["POST /api/v1/submissions/:id/review (approved)"]
-    H -->|Reject| J["POST /api/v1/submissions/:id/review (rejected)"]
+    H -->|Approve| I["POST /api/v1/submissions/:id/review (approved, reviewer_type: human)"]
+    H -->|Reject| J["POST /api/v1/submissions/:id/review (rejected, reviewer_type: human)"]
     I --> K["Webhook fires to originating system"]
     J --> K
 ```
+
+**Note:** When a submission arrives via AI escalation (ai_then_human mode), the human reviewer sees the AI's verdict, confidence score, and reasoning alongside the policy flags and guardrail results. This gives the human reviewer full context for their decision.
 
 ### Flow 3: Analytics and Feedback (Developer / Ops)
 
@@ -218,6 +233,35 @@ We are excited to announce our Q2 product launch with guaranteed returns on your
         <td style="padding:8px; border-bottom:1px solid #eee">All required metadata present</td>
       </tr>
     </table>
+    <h3 style="margin:0 0 8px">Guardrail Results</h3>
+    <table style="width:100%; border-collapse:collapse; margin-bottom:16px">
+      <tr style="background:#f5f5f5">
+        <th style="text-align:left; padding:8px; border-bottom:1px solid #ddd">Guardrail</th>
+        <th style="text-align:left; padding:8px; border-bottom:1px solid #ddd">Verdict</th>
+        <th style="text-align:left; padding:8px; border-bottom:1px solid #ddd">Confidence</th>
+        <th style="text-align:left; padding:8px; border-bottom:1px solid #ddd">Reasoning</th>
+      </tr>
+      <tr>
+        <td style="padding:8px; border-bottom:1px solid #eee">Content Safety (Llama Guard)</td>
+        <td style="padding:8px; border-bottom:1px solid #eee"><span style="background:#51cf66; color:white; padding:1px 6px; border-radius:4px; font-size:12px">PASS</span></td>
+        <td style="padding:8px; border-bottom:1px solid #eee">0.97</td>
+        <td style="padding:8px; border-bottom:1px solid #eee">No harmful content detected</td>
+      </tr>
+      <tr>
+        <td style="padding:8px; border-bottom:1px solid #eee">PII Scanner (Guardrails AI)</td>
+        <td style="padding:8px; border-bottom:1px solid #eee"><span style="background:#ffd43b; padding:1px 6px; border-radius:4px; font-size:12px">FLAG</span></td>
+        <td style="padding:8px; border-bottom:1px solid #eee">0.72</td>
+        <td style="padding:8px; border-bottom:1px solid #eee">Possible email address in body text</td>
+      </tr>
+    </table>
+    <h3 style="margin:0 0 8px">AI Review</h3>
+    <div style="background:#e7f5ff; border:1px solid #74c0fc; padding:12px; border-radius:8px; margin-bottom:16px">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px">
+        <span style="font-weight:bold">AI Verdict: <span style="background:#ffd43b; padding:1px 8px; border-radius:4px">ESCALATED</span></span>
+        <span style="color:#666; font-size:12px">Confidence: 0.62 (threshold: 0.80)</span>
+      </div>
+      <div style="color:#495057; font-size:13px">Content appears promotional and may contain financial claims. AI is not confident enough to auto-approve. Escalated for human review.</div>
+    </div>
     <h3 style="margin:0 0 8px">Your Review</h3>
     <textarea style="width:100%; height:60px; border:1px solid #ddd; border-radius:4px; padding:8px; font-size:14px; box-sizing:border-box; margin-bottom:12px" placeholder="Optional comment..."></textarea>
     <div style="display:flex; gap:12px">
@@ -226,6 +270,8 @@ We are excited to announce our Q2 product launch with guaranteed returns on your
     </div>
   </div>
 </div>
+
+**Note:** The Guardrail Results and AI Review sections only appear when the submission has been processed by those tiers. Submissions that were auto-approved by rules alone will not show these sections.
 
 ### Screen 3: Analytics Dashboard
 

@@ -54,6 +54,22 @@ For SMBs, this is typically handled ad-hoc: a Slack message asking "can I send t
 | Conductor (Orkes) | Microservice orchestration with human tasks | Enterprise complexity, Java ecosystem | No -- wrong target market |
 | Custom build (TypeScript + Postgres + Redis) | Exactly our scope, lightweight, npm-publishable, self-hostable | Need to build from scratch | Yes -- fills the gap |
 
+### AI-Powered Review and Guardrail Ecosystem (April 2026)
+
+The guardrail landscape has matured into distinct tiers that are relevant to Greenlight's integration strategy:
+
+| Framework | Type | Integration Model | Relevance to Greenlight |
+|-----------|------|-------------------|------------------------|
+| **Guardrails AI** | Input/output validators for LLM content | Python SDK + REST API (guardrails-ai-sdk 0.4.0). Validators from Guardrails Hub. Can run as standalone Flask service via `guardrails start`. | High -- can be wired as an external guardrail step. REST API makes it a natural fit for Greenlight's guardrail adapter interface. |
+| **NVIDIA NeMo Guardrails** | Programmable rails for LLM conversations | Python toolkit, Colang rail definitions, microservice deployment. Integrates with LangChain, LangGraph, LlamaIndex. | High -- NeMo microservice can sit behind Greenlight's guardrail webhook. Supports multi-agent safety layer patterns. |
+| **Meta Llama Guard 4** | LLM-based content safety classifier | Open-weight 12B dense multimodal model. Classifies inputs/outputs against safety taxonomy. Runs on single GPU (24GB VRAM) or via API providers. | High -- ideal as an AI reviewer step. Classifies content into harm categories (violence, hate, etc.) and returns structured verdicts. |
+| **OpenAI Guardrails** | Moderation + safety checks | REST API with moderation, jailbreak detection, PII detection, hallucination detection, off-topic filtering. Custom policy rules at runtime without retraining. | High -- another natural external guardrail. API-based, returns category scores, integrates with any HTTP client. |
+| **IBM Granite Guardian** | LLM content moderation | Open-source moderation model from IBM. Evaluates content against configurable policy dimensions. | Medium -- another option for self-hosted AI review. |
+
+**Key architectural insight:** These frameworks all expose either REST APIs or can be wrapped in HTTP services. Greenlight should define a **standard guardrail adapter interface** (HTTP request/response contract) so that any of these frameworks can be plugged in as a review step without Greenlight having framework-specific code. This is the same pattern as the existing "custom webhook" policy type, but elevated to a first-class concept with structured verdicts, confidence scores, and escalation signals.
+
+**AI-as-reviewer insight:** LLM-based review (using models like Llama Guard or OpenAI Moderation) can serve as an intermediate review tier between rule-based policies and human review. The flow becomes: rules first (fast, deterministic) -> AI review second (slower but contextual) -> human review third (only for flagged/ambiguous items). This tiered approach can dramatically reduce human review volume while maintaining safety.
+
 ### Constraints
 
 - Must be open-source (MIT or Apache 2.0) to drive adoption
@@ -62,6 +78,8 @@ For SMBs, this is typically handled ad-hoc: a Slack message asking "can I send t
 - Must have sub-second latency for auto-approved items (policy-only path)
 - Must support webhook-based integration (no SDK lock-in)
 - Must store all approval data for analytics and audit (GDPR-aware: support data retention policies)
+- Must support pluggable AI guardrail frameworks as external review steps without framework-specific coupling
+- Must support AI-based review as a first-class review type alongside human review
 
 ## DOK 3: Insights and Analysis
 
@@ -96,6 +114,9 @@ The gap is clear: a lightweight, open-source, channel-agnostic approval proxy th
 | Human review UI | Build a full review dashboard | Headless API + integrate with Slack/email/existing tools | Headless first -- provide API + Slack/email notifications, ship minimal web UI for standalone use |
 | Storage | SQLite (simpler) | PostgreSQL (scalable, better analytics queries) | PostgreSQL -- analytics is a core feature, needs proper queries |
 | Queue | In-process queue | Redis-backed queue | Redis -- approval SLAs need reliable delayed jobs for escalation |
+| AI review approach | Built-in LLM integration (call OpenAI/Llama directly) | Pluggable guardrail adapter (HTTP contract, BYO model) | Pluggable adapter -- avoids provider lock-in, lets operators choose their own guardrail stack. Greenlight defines the contract; the operator wires the implementation. |
+| AI review placement | AI as another policy type | AI as a distinct review tier between policies and human review | Distinct tier -- AI review is qualitatively different from rule-based policies (slower, probabilistic, contextual). Modeling it as a review step with its own verdict record provides better auditability and lets operators tune the escalation threshold. |
+| Guardrail chaining | Single guardrail per submission | Pipeline of multiple guardrails evaluated in sequence | Pipeline -- operators may want both content safety (Llama Guard) and structural validation (Guardrails AI) on the same submission. A guardrail pipeline with short-circuit on reject handles this cleanly. |
 
 ## DOK 4: Spiky POVs
 
