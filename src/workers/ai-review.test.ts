@@ -1,13 +1,66 @@
 import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from "vitest";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { enqueueAIReview } from "./ai-review.js";
+import { enqueueAIReview, processAIReviewJob, validateAIResponse } from "./ai-review.js";
 import type { AIReviewJobData } from "./ai-review.js";
 
 const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
+
+// ---------- validateAIResponse ----------
+
+describe("validateAIResponse", () => {
+  it("validates a correct response", () => {
+    const result = validateAIResponse({
+      decision: "approved",
+      confidence: 0.95,
+      reasoning: "Safe content",
+      model_id: "gpt-4",
+      categories: ["safe"],
+    });
+    expect(result.decision).toBe("approved");
+    expect(result.confidence).toBe(0.95);
+    expect(result.reasoning).toBe("Safe content");
+    expect(result.model_id).toBe("gpt-4");
+    expect(result.categories).toEqual(["safe"]);
+  });
+
+  it("rejects invalid decision", () => {
+    expect(() => validateAIResponse({ decision: "bad", confidence: 0.5, reasoning: "ok" })).toThrow(
+      "Invalid AI decision",
+    );
+  });
+
+  it("rejects missing confidence", () => {
+    expect(() => validateAIResponse({ decision: "approved", reasoning: "ok" })).toThrow(
+      "Invalid AI confidence",
+    );
+  });
+
+  it("rejects confidence out of range", () => {
+    expect(() =>
+      validateAIResponse({ decision: "approved", confidence: 1.5, reasoning: "ok" }),
+    ).toThrow("Invalid AI confidence");
+  });
+
+  it("rejects non-string reasoning", () => {
+    expect(() =>
+      validateAIResponse({ decision: "approved", confidence: 0.5, reasoning: 123 }),
+    ).toThrow("Invalid AI reasoning");
+  });
+
+  it("handles missing optional fields", () => {
+    const result = validateAIResponse({
+      decision: "rejected",
+      confidence: 0.8,
+      reasoning: "Harmful",
+    });
+    expect(result.categories).toBeUndefined();
+    expect(result.model_id).toBeUndefined();
+  });
+});
 
 // ---------- enqueueAIReview ----------
 
@@ -36,182 +89,356 @@ describe("enqueueAIReview", () => {
   });
 });
 
-// ---------- AI review worker logic (tested via direct function simulation) ----------
+// ---------- processAIReviewJob ----------
 
-describe("AI review worker logic", () => {
-  // We test the core logic by simulating what the worker does
+function mockPrisma(overrides: Record<string, unknown> = {}) {
+  const txMocks = {
+    submission: {
+      findUnique: vi.fn().mockResolvedValue({ status: "pending" }),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    review: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: vi.fn().mockResolvedValue({}),
+    },
+    ...overrides,
+  };
+  return {
+    reviewConfig: {
+      findFirst: vi.fn().mockResolvedValue({
+        aiReviewerEndpoint: "https://ai.test/review",
+        aiReviewerTimeoutMs: 10000,
+        aiConfidenceThreshold: 0.8,
+        aiReviewerModel: "default-model",
+      }),
+    },
+    review: { create: vi.fn().mockResolvedValue({}) },
+    submission: {
+      findUnique: vi.fn().mockResolvedValue({ status: "pending" }),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    auditEvent: { create: vi.fn().mockResolvedValue({}) },
+    $transaction: vi
+      .fn()
+      .mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(txMocks)),
+    _tx: txMocks,
+    ...overrides,
+  };
+}
 
-  it("processes ai_only approved verdict", async () => {
+const baseJobData: AIReviewJobData = {
+  submissionId: "sub-1",
+  content: "test content",
+  metadata: {},
+  channel: "email",
+  contentType: "text/plain",
+  reviewMode: "ai_only",
+  callbackUrl: null,
+};
+
+describe("processAIReviewJob", () => {
+  it("ai_only: approves on approved verdict", async () => {
     server.use(
       http.post("https://ai.test/review", () =>
         HttpResponse.json({
           decision: "approved",
           confidence: 0.95,
-          reasoning: "Content looks safe",
+          reasoning: "Safe",
           model_id: "gpt-4",
         }),
       ),
     );
 
-    const resp = await fetch("https://ai.test/review", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ submission_id: "sub-1", content: "hello" }),
-    });
+    const prisma = mockPrisma();
+    await processAIReviewJob(
+      prisma as unknown as Parameters<typeof processAIReviewJob>[0],
+      baseJobData,
+    );
 
-    const body = (await resp.json()) as Record<string, unknown>;
-    expect(body.decision).toBe("approved");
-    expect(body.confidence).toBe(0.95);
-    expect(body.reasoning).toBe("Content looks safe");
-    expect(body.model_id).toBe("gpt-4");
+    const txMocks = (prisma as unknown as Record<string, unknown>)._tx as Record<
+      string,
+      Record<string, { mock: { calls: unknown[][] } }>
+    >;
+    expect(txMocks.review.create.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          decision: "approved",
+          reviewerType: "ai",
+        }),
+      }),
+    );
+    expect(txMocks.submission.update.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "approved" }),
+      }),
+    );
   });
 
-  it("processes ai_only rejected verdict", async () => {
+  it("ai_only: rejects on rejected verdict", async () => {
     server.use(
       http.post("https://ai.test/review", () =>
         HttpResponse.json({
           decision: "rejected",
-          confidence: 0.88,
-          reasoning: "Contains harmful content",
-          categories: ["toxicity"],
+          confidence: 0.9,
+          reasoning: "Harmful",
         }),
       ),
     );
 
-    const resp = await fetch("https://ai.test/review", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ submission_id: "sub-1", content: "bad content" }),
-    });
+    const prisma = mockPrisma();
+    await processAIReviewJob(
+      prisma as unknown as Parameters<typeof processAIReviewJob>[0],
+      baseJobData,
+    );
 
-    const body = (await resp.json()) as Record<string, unknown>;
-    expect(body.decision).toBe("rejected");
-    expect(body.categories).toEqual(["toxicity"]);
+    const txMocks = (prisma as unknown as Record<string, unknown>)._tx as Record<
+      string,
+      Record<string, { mock: { calls: unknown[][] } }>
+    >;
+    expect(txMocks.review.create.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ decision: "rejected" }),
+      }),
+    );
+    expect(txMocks.submission.update.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "rejected" }),
+      }),
+    );
   });
 
-  it("ai_then_human escalates on low confidence", async () => {
+  it("ai_only: escalates on escalated verdict (fail-open)", async () => {
     server.use(
       http.post("https://ai.test/review", () =>
         HttpResponse.json({
-          decision: "approved",
-          confidence: 0.5,
-          reasoning: "Not sure about this one",
+          decision: "escalated",
+          confidence: 0.6,
+          reasoning: "Unsure",
         }),
       ),
     );
 
-    const resp = await fetch("https://ai.test/review", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ submission_id: "sub-1", content: "ambiguous" }),
-    });
+    const prisma = mockPrisma();
+    await processAIReviewJob(
+      prisma as unknown as Parameters<typeof processAIReviewJob>[0],
+      baseJobData,
+    );
 
-    const body = (await resp.json()) as Record<string, unknown>;
-    // With threshold 0.8 and confidence 0.5, should escalate
-    const threshold = 0.8;
-    const shouldEscalate = (body.confidence as number) < threshold;
-    expect(shouldEscalate).toBe(true);
+    const txMocks = (prisma as unknown as Record<string, unknown>)._tx as Record<
+      string,
+      Record<string, { mock: { calls: unknown[][] } }>
+    >;
+    expect(txMocks.review.create.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ decision: "escalated" }),
+      }),
+    );
+    // Should NOT update submission status for escalated
+    expect(txMocks.submission.update).not.toHaveBeenCalled();
   });
 
-  it("ai_then_human accepts high confidence verdict", async () => {
+  it("ai_then_human: accepts high-confidence verdict", async () => {
     server.use(
       http.post("https://ai.test/review", () =>
         HttpResponse.json({
           decision: "approved",
           confidence: 0.95,
-          reasoning: "Clearly safe content",
+          reasoning: "Clearly safe",
         }),
       ),
     );
 
-    const resp = await fetch("https://ai.test/review", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ submission_id: "sub-1", content: "safe content" }),
+    const prisma = mockPrisma();
+    await processAIReviewJob(prisma as unknown as Parameters<typeof processAIReviewJob>[0], {
+      ...baseJobData,
+      reviewMode: "ai_then_human",
     });
 
-    const body = (await resp.json()) as Record<string, unknown>;
-    const threshold = 0.8;
-    const shouldAccept = (body.confidence as number) >= threshold;
-    expect(shouldAccept).toBe(true);
-    expect(body.decision).toBe("approved");
-  });
-
-  it("handles AI reviewer timeout", async () => {
-    server.use(
-      http.post("https://ai.test/review", async () => {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        return HttpResponse.json({ decision: "approved", confidence: 0.9, reasoning: "ok" });
+    const txMocks = (prisma as unknown as Record<string, unknown>)._tx as Record<
+      string,
+      Record<string, { mock: { calls: unknown[][] } }>
+    >;
+    expect(txMocks.review.create.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          decision: "approved",
+          reviewerType: "ai",
+        }),
       }),
     );
-
-    // Simulate a timeout
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 50);
-
-    try {
-      await fetch("https://ai.test/review", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: "test" }),
-        signal: controller.signal,
-      });
-      expect.fail("Should have thrown");
-    } catch (err) {
-      expect(err).toBeDefined();
-    } finally {
-      clearTimeout(timer);
-    }
+    expect(txMocks.submission.update).toHaveBeenCalled();
   });
 
-  it("handles AI reviewer error response", async () => {
+  it("ai_then_human: escalates on low confidence", async () => {
     server.use(
       http.post("https://ai.test/review", () =>
-        HttpResponse.json({ error: "internal" }, { status: 500 }),
+        HttpResponse.json({
+          decision: "approved",
+          confidence: 0.5,
+          reasoning: "Not sure",
+        }),
       ),
     );
 
-    const resp = await fetch("https://ai.test/review", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: "test" }),
+    const prisma = mockPrisma();
+    await processAIReviewJob(prisma as unknown as Parameters<typeof processAIReviewJob>[0], {
+      ...baseJobData,
+      reviewMode: "ai_then_human",
     });
 
-    expect(resp.ok).toBe(false);
-    expect(resp.status).toBe(500);
-  });
-});
-
-// ---------- AIReviewJobData shape ----------
-
-describe("AIReviewJobData", () => {
-  it("includes all required fields", () => {
-    const data: AIReviewJobData = {
-      submissionId: "sub-1",
-      content: "test content",
-      metadata: { key: "value" },
-      channel: "email",
-      contentType: "text/plain",
-      reviewMode: "ai_then_human",
-      callbackUrl: "https://example.com/webhook",
-    };
-
-    expect(data.reviewMode).toBe("ai_then_human");
-    expect(data.callbackUrl).toBe("https://example.com/webhook");
-    expect(data.metadata).toEqual({ key: "value" });
+    const txMocks = (prisma as unknown as Record<string, unknown>)._tx as Record<
+      string,
+      Record<string, { mock: { calls: unknown[][] } }>
+    >;
+    expect(txMocks.review.create.mock.calls[0][0]).toEqual(
+      expect.objectContaining({
+        data: expect.objectContaining({ decision: "escalated" }),
+      }),
+    );
+    expect(txMocks.submission.update).not.toHaveBeenCalled();
   });
 
-  it("supports null callback_url", () => {
-    const data: AIReviewJobData = {
-      submissionId: "sub-1",
-      content: "test",
-      metadata: {},
-      channel: "slack",
-      contentType: "text/plain",
-      reviewMode: "ai_only",
-      callbackUrl: null,
-    };
+  it("fail-open: escalates on AI endpoint error", async () => {
+    server.use(
+      http.post("https://ai.test/review", () =>
+        HttpResponse.json({ error: "boom" }, { status: 500 }),
+      ),
+    );
 
-    expect(data.callbackUrl).toBeNull();
+    const prisma = mockPrisma();
+    await processAIReviewJob(
+      prisma as unknown as Parameters<typeof processAIReviewJob>[0],
+      baseJobData,
+    );
+
+    // Should create an escalated review via escalateToHuman (uses prisma.review.create directly)
+    const reviewCreate = (
+      prisma as unknown as Record<string, Record<string, ReturnType<typeof vi.fn>>>
+    ).review.create;
+    expect(reviewCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          decision: "escalated",
+          reviewerType: "ai",
+        }),
+      }),
+    );
+  });
+
+  it("fail-open: escalates when no AI endpoint configured", async () => {
+    const prisma = mockPrisma({
+      reviewConfig: { findFirst: vi.fn().mockResolvedValue(null) },
+    });
+    await processAIReviewJob(
+      prisma as unknown as Parameters<typeof processAIReviewJob>[0],
+      baseJobData,
+    );
+
+    const reviewCreate = (
+      prisma as unknown as Record<string, Record<string, ReturnType<typeof vi.fn>>>
+    ).review.create;
+    expect(reviewCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          decision: "escalated",
+          reasoning: expect.stringContaining("No AI reviewer endpoint"),
+        }),
+      }),
+    );
+  });
+
+  it("skips when submission is no longer pending", async () => {
+    server.use(
+      http.post("https://ai.test/review", () =>
+        HttpResponse.json({
+          decision: "approved",
+          confidence: 0.95,
+          reasoning: "Safe",
+        }),
+      ),
+    );
+
+    const txMocks = {
+      submission: {
+        findUnique: vi.fn().mockResolvedValue({ status: "approved" }),
+        update: vi.fn(),
+      },
+      review: {
+        findFirst: vi.fn(),
+        create: vi.fn(),
+      },
+    };
+    const prisma = mockPrisma();
+    (prisma as unknown as Record<string, unknown>).$transaction = vi
+      .fn()
+      .mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(txMocks));
+
+    await processAIReviewJob(
+      prisma as unknown as Parameters<typeof processAIReviewJob>[0],
+      baseJobData,
+    );
+
+    // Transaction returned false, no review created
+    expect(txMocks.review.create).not.toHaveBeenCalled();
+  });
+
+  it("skips when AI review already exists (idempotency)", async () => {
+    server.use(
+      http.post("https://ai.test/review", () =>
+        HttpResponse.json({
+          decision: "approved",
+          confidence: 0.95,
+          reasoning: "Safe",
+        }),
+      ),
+    );
+
+    const txMocks = {
+      submission: {
+        findUnique: vi.fn().mockResolvedValue({ status: "pending" }),
+        update: vi.fn(),
+      },
+      review: {
+        findFirst: vi.fn().mockResolvedValue({ id: "existing-review" }),
+        create: vi.fn(),
+      },
+    };
+    const prisma = mockPrisma();
+    (prisma as unknown as Record<string, unknown>).$transaction = vi
+      .fn()
+      .mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => fn(txMocks));
+
+    await processAIReviewJob(
+      prisma as unknown as Parameters<typeof processAIReviewJob>[0],
+      baseJobData,
+    );
+
+    expect(txMocks.review.create).not.toHaveBeenCalled();
+  });
+
+  it("fail-open: escalates on invalid AI response", async () => {
+    server.use(
+      http.post("https://ai.test/review", () =>
+        HttpResponse.json({ decision: "maybe", confidence: "high", reasoning: 42 }),
+      ),
+    );
+
+    const prisma = mockPrisma();
+    await processAIReviewJob(
+      prisma as unknown as Parameters<typeof processAIReviewJob>[0],
+      baseJobData,
+    );
+
+    const reviewCreate = (
+      prisma as unknown as Record<string, Record<string, ReturnType<typeof vi.fn>>>
+    ).review.create;
+    expect(reviewCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          decision: "escalated",
+          reviewerType: "ai",
+        }),
+      }),
+    );
   });
 });

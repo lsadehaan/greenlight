@@ -61,178 +61,7 @@ export function createAIReviewWorker(
   const worker = new Worker<AIReviewJobData>(
     AI_REVIEW_QUEUE_NAME,
     async (job) => {
-      const { submissionId, content, metadata, channel, contentType, reviewMode, callbackUrl } =
-        job.data;
-
-      // Load review config
-      const config = await prisma.reviewConfig.findFirst();
-      if (!config?.aiReviewerEndpoint) {
-        // No AI endpoint configured — escalate to human
-        await escalateToHuman(prisma, submissionId, "No AI reviewer endpoint configured");
-        return;
-      }
-
-      const timeoutMs = config.aiReviewerTimeoutMs || 15000;
-      const threshold = config.aiConfidenceThreshold ?? 0.8;
-      const start = Date.now();
-
-      let aiResponse: AIAdapterResponse;
-
-      try {
-        const resp = await fetch(config.aiReviewerEndpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            submission_id: submissionId,
-            content,
-            metadata,
-            channel,
-            content_type: contentType,
-          }),
-          signal: AbortSignal.timeout(timeoutMs),
-        });
-
-        if (!resp.ok) {
-          throw new Error(`AI reviewer returned status ${resp.status}`);
-        }
-
-        aiResponse = (await resp.json()) as AIAdapterResponse;
-      } catch (err) {
-        const latencyMs = Date.now() - start;
-        const errorMsg = err instanceof Error ? err.message : String(err);
-
-        // Fail open: escalate to human review
-        await escalateToHuman(prisma, submissionId, `AI review failed: ${errorMsg}`);
-
-        // Audit the failure
-        try {
-          await recordAuditEvent(prisma, {
-            eventType: "review.escalated",
-            submissionId,
-            actor: "ai-reviewer",
-            actorType: "ai",
-            payload: { error: errorMsg, latency_ms: latencyMs, reason: "ai_failure" },
-          });
-        } catch {
-          // Best-effort
-        }
-
-        return;
-      }
-
-      const latencyMs = Date.now() - start;
-      const modelId = aiResponse.model_id ?? config.aiReviewerModel ?? "unknown";
-
-      // Determine final decision based on review mode
-      let finalDecision: "approved" | "rejected" | "escalated";
-
-      if (reviewMode === "ai_only") {
-        // AI verdict is final; escalated falls back to pending for human review (fail-open)
-        finalDecision =
-          aiResponse.decision === "approved" || aiResponse.decision === "rejected"
-            ? aiResponse.decision
-            : "escalated";
-      } else {
-        // ai_then_human mode
-        if (aiResponse.confidence >= threshold) {
-          finalDecision =
-            aiResponse.decision === "approved" || aiResponse.decision === "rejected"
-              ? aiResponse.decision
-              : "escalated";
-        } else {
-          // Low confidence — escalate to human
-          finalDecision = "escalated";
-        }
-      }
-
-      // Check submission is still pending (guard against race with human review)
-      const currentSubmission = await prisma.submission.findUnique({
-        where: { id: submissionId },
-        select: { status: true },
-      });
-      if (!currentSubmission || currentSubmission.status !== "pending") {
-        // Submission already decided — skip AI review
-        return;
-      }
-
-      // Check for existing AI review (idempotency guard for retries)
-      const existingAIReview = await prisma.review.findFirst({
-        where: { submissionId, reviewerType: "ai" },
-      });
-      if (existingAIReview) {
-        return;
-      }
-
-      // Store AI review record
-      await prisma.review.create({
-        data: {
-          submissionId,
-          reviewerType: "ai",
-          reviewerIdentity: modelId,
-          decision: finalDecision,
-          confidence: aiResponse.confidence,
-          reasoning: aiResponse.reasoning,
-          aiMetadata: {
-            model_id: modelId,
-            categories: aiResponse.categories ?? [],
-            latency_ms: latencyMs,
-          } as object,
-        },
-      });
-
-      // Update submission status
-      if (finalDecision === "approved" || finalDecision === "rejected") {
-        await prisma.submission.update({
-          where: { id: submissionId },
-          data: {
-            status: finalDecision,
-            decidedAt: new Date(),
-          },
-        });
-
-        // Trigger webhook if callback_url exists
-        if (webhookQueue && callbackUrl) {
-          try {
-            const now = new Date();
-            await enqueueWebhook(webhookQueue, {
-              submissionId,
-              callbackUrl,
-              payload: {
-                submission_id: submissionId,
-                decision: finalDecision,
-                reviewer_type: "ai",
-                reviewer_identity: modelId,
-                decided_at: now.toISOString(),
-                timestamp: now.toISOString(),
-              },
-            });
-          } catch {
-            // Best-effort webhook
-          }
-        }
-      } else {
-        // Escalated — leave as pending for human review
-        // Submission status stays "pending"
-      }
-
-      // Audit event
-      try {
-        await recordAuditEvent(prisma, {
-          eventType: finalDecision === "escalated" ? "review.escalated" : "review.created",
-          submissionId,
-          actor: modelId,
-          actorType: "ai",
-          payload: {
-            decision: finalDecision,
-            confidence: aiResponse.confidence,
-            reasoning: aiResponse.reasoning,
-            latency_ms: latencyMs,
-            review_mode: reviewMode,
-          },
-        });
-      } catch {
-        // Best-effort
-      }
+      await processAIReviewJob(prisma, job.data, webhookQueue);
     },
     { connection },
   );
@@ -246,6 +75,217 @@ export function createAIReviewWorker(
   });
 
   return worker;
+}
+
+/** Core processing logic — exported for testing */
+export async function processAIReviewJob(
+  prisma: PrismaClient,
+  data: AIReviewJobData,
+  webhookQueue?: Queue<WebhookJobData>,
+): Promise<void> {
+  const { submissionId, content, metadata, channel, contentType, reviewMode, callbackUrl } = data;
+
+  // Load review config
+  const config = await prisma.reviewConfig.findFirst();
+  if (!config?.aiReviewerEndpoint) {
+    // No AI endpoint configured — escalate to human
+    await escalateToHuman(prisma, submissionId, "No AI reviewer endpoint configured");
+    return;
+  }
+
+  const timeoutMs = config.aiReviewerTimeoutMs || 15000;
+  const threshold = config.aiConfidenceThreshold ?? 0.8;
+  const start = Date.now();
+
+  let aiResponse: AIAdapterResponse;
+
+  try {
+    const resp = await fetch(config.aiReviewerEndpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        submission_id: submissionId,
+        content,
+        metadata,
+        channel,
+        content_type: contentType,
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+
+    if (!resp.ok) {
+      throw new Error(`AI reviewer returned status ${resp.status}`);
+    }
+
+    const rawBody = (await resp.json()) as Record<string, unknown>;
+    aiResponse = validateAIResponse(rawBody);
+  } catch (err) {
+    const latencyMs = Date.now() - start;
+    const errorMsg = err instanceof Error ? err.message : String(err);
+
+    // Fail open: escalate to human review
+    await escalateToHuman(prisma, submissionId, `AI review failed: ${errorMsg}`);
+
+    // Audit the failure
+    try {
+      await recordAuditEvent(prisma, {
+        eventType: "review.escalated",
+        submissionId,
+        actor: "ai-reviewer",
+        actorType: "ai",
+        payload: { error: errorMsg, latency_ms: latencyMs, reason: "ai_failure" },
+      });
+    } catch {
+      // Best-effort
+    }
+
+    return;
+  }
+
+  const latencyMs = Date.now() - start;
+  const modelId = aiResponse.model_id ?? config.aiReviewerModel ?? "unknown";
+
+  // Determine final decision based on review mode
+  let finalDecision: "approved" | "rejected" | "escalated";
+
+  if (reviewMode === "ai_only") {
+    // AI verdict is final; escalated falls back to pending for human review (fail-open)
+    finalDecision =
+      aiResponse.decision === "approved" || aiResponse.decision === "rejected"
+        ? aiResponse.decision
+        : "escalated";
+  } else {
+    // ai_then_human mode
+    if (aiResponse.confidence >= threshold) {
+      finalDecision =
+        aiResponse.decision === "approved" || aiResponse.decision === "rejected"
+          ? aiResponse.decision
+          : "escalated";
+    } else {
+      // Low confidence — escalate to human
+      finalDecision = "escalated";
+    }
+  }
+
+  // Atomic: check guards + create review + update submission in transaction
+  const wrote = await prisma.$transaction(async (tx) => {
+    // Check submission is still pending (guard against race with human review)
+    const current = await tx.submission.findUnique({
+      where: { id: submissionId },
+      select: { status: true },
+    });
+    if (!current || current.status !== "pending") {
+      return false;
+    }
+
+    // Idempotency guard for BullMQ retries
+    const existing = await tx.review.findFirst({
+      where: { submissionId, reviewerType: "ai" },
+    });
+    if (existing) {
+      return false;
+    }
+
+    // Store AI review record
+    await tx.review.create({
+      data: {
+        submissionId,
+        reviewerType: "ai",
+        reviewerIdentity: modelId,
+        decision: finalDecision,
+        confidence: aiResponse.confidence,
+        reasoning: aiResponse.reasoning,
+        aiMetadata: {
+          model_id: modelId,
+          categories: aiResponse.categories ?? [],
+          latency_ms: latencyMs,
+        } as object,
+      },
+    });
+
+    // Update submission status for terminal decisions
+    if (finalDecision === "approved" || finalDecision === "rejected") {
+      await tx.submission.update({
+        where: { id: submissionId },
+        data: {
+          status: finalDecision,
+          decidedAt: new Date(),
+        },
+      });
+    }
+
+    return true;
+  });
+
+  if (!wrote) {
+    return;
+  }
+
+  // Trigger webhook if callback_url exists and decision is terminal
+  if (
+    webhookQueue &&
+    callbackUrl &&
+    (finalDecision === "approved" || finalDecision === "rejected")
+  ) {
+    try {
+      const now = new Date();
+      await enqueueWebhook(webhookQueue, {
+        submissionId,
+        callbackUrl,
+        payload: {
+          submission_id: submissionId,
+          decision: finalDecision,
+          reviewer_type: "ai",
+          reviewer_identity: modelId,
+          decided_at: now.toISOString(),
+          timestamp: now.toISOString(),
+        },
+      });
+    } catch {
+      // Best-effort webhook
+    }
+  }
+
+  // Audit event
+  try {
+    await recordAuditEvent(prisma, {
+      eventType: finalDecision === "escalated" ? "review.escalated" : "review.created",
+      submissionId,
+      actor: modelId,
+      actorType: "ai",
+      payload: {
+        decision: finalDecision,
+        confidence: aiResponse.confidence,
+        reasoning: aiResponse.reasoning,
+        latency_ms: latencyMs,
+        review_mode: reviewMode,
+      },
+    });
+  } catch {
+    // Best-effort
+  }
+}
+
+export function validateAIResponse(raw: Record<string, unknown>): AIAdapterResponse {
+  const { decision, confidence, reasoning, categories, model_id } = raw;
+
+  if (decision !== "approved" && decision !== "rejected" && decision !== "escalated") {
+    throw new Error(`Invalid AI decision: ${String(decision)}`);
+  }
+  if (typeof confidence !== "number" || confidence < 0 || confidence > 1) {
+    throw new Error(`Invalid AI confidence: ${String(confidence)}`);
+  }
+  if (typeof reasoning !== "string") {
+    throw new Error(`Invalid AI reasoning: expected string`);
+  }
+
+  return {
+    decision,
+    confidence,
+    reasoning,
+    categories: Array.isArray(categories) ? (categories as string[]) : undefined,
+    model_id: typeof model_id === "string" ? model_id : undefined,
+  };
 }
 
 async function escalateToHuman(
