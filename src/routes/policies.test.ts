@@ -246,6 +246,63 @@ describe("PUT /api/v1/policies/:id", () => {
     expect(res.status).toBe(400);
     expect(res.body.message).toContain("keywords");
   });
+
+  it("returns 400 for empty name on update", async () => {
+    const existing = {
+      id: UUID,
+      name: "p",
+      type: "regex",
+      config: { pattern: "x" },
+      action: "block",
+      scopeChannel: null,
+      scopeContentType: null,
+      priority: 0,
+      active: true,
+      createdAt: new Date(),
+    };
+    const app = buildApp({ findUnique: vi.fn().mockResolvedValue(existing) });
+    const res = await request(app).put(`/api/v1/policies/${UUID}`).send({ name: "  " });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain("name");
+  });
+
+  it("returns 400 for empty action on update", async () => {
+    const existing = {
+      id: UUID,
+      name: "p",
+      type: "regex",
+      config: { pattern: "x" },
+      action: "block",
+      scopeChannel: null,
+      scopeContentType: null,
+      priority: 0,
+      active: true,
+      createdAt: new Date(),
+    };
+    const app = buildApp({ findUnique: vi.fn().mockResolvedValue(existing) });
+    const res = await request(app).put(`/api/v1/policies/${UUID}`).send({ action: "" });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain("action");
+  });
+
+  it("returns 400 for non-integer priority", async () => {
+    const existing = {
+      id: UUID,
+      name: "p",
+      type: "regex",
+      config: { pattern: "x" },
+      action: "block",
+      scopeChannel: null,
+      scopeContentType: null,
+      priority: 0,
+      active: true,
+      createdAt: new Date(),
+    };
+    const app = buildApp({ findUnique: vi.fn().mockResolvedValue(existing) });
+    const res = await request(app).put(`/api/v1/policies/${UUID}`).send({ priority: 1.5 });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain("integer");
+  });
 });
 
 describe("DELETE /api/v1/policies/:id", () => {

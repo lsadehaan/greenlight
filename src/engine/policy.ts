@@ -98,6 +98,28 @@ export function validatePolicyConfig(type: string, config: unknown): string | nu
       if (typeof c.url !== "string" || c.url.length === 0) {
         return "webhook config requires a non-empty 'url' string";
       }
+      try {
+        const parsed = new URL(c.url);
+        if (parsed.protocol !== "https:") {
+          return "webhook url must use https";
+        }
+        const host = parsed.hostname;
+        if (
+          host === "localhost" ||
+          host === "127.0.0.1" ||
+          host === "::1" ||
+          host === "0.0.0.0" ||
+          host.startsWith("10.") ||
+          host.startsWith("172.") ||
+          host.startsWith("192.168.") ||
+          host.endsWith(".local") ||
+          host === "169.254.169.254"
+        ) {
+          return "webhook url must not target private/loopback addresses";
+        }
+      } catch {
+        return "webhook url is not a valid URL";
+      }
       return null;
     }
     default:
@@ -105,7 +127,15 @@ export function validatePolicyConfig(type: string, config: unknown): string | nu
   }
 }
 
+const REGEX_CONTENT_MAX_LEN = 100_000;
+
 function evaluateRegex(content: string, config: RegexConfig): { match: boolean; detail: string } {
+  if (content.length > REGEX_CONTENT_MAX_LEN) {
+    return {
+      match: true,
+      detail: `Content too long for regex evaluation (${content.length} chars, max ${REGEX_CONTENT_MAX_LEN})`,
+    };
+  }
   const re = new RegExp(config.pattern, config.flags);
   const matched = re.test(content);
   return {

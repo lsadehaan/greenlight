@@ -73,6 +73,25 @@ describe("validatePolicyConfig", () => {
     it("rejects missing url", () => {
       expect(validatePolicyConfig("webhook", {})).toContain("url");
     });
+    it("rejects non-https url", () => {
+      expect(validatePolicyConfig("webhook", { url: "http://example.com/hook" })).toContain(
+        "https",
+      );
+    });
+    it("rejects private/loopback urls", () => {
+      expect(validatePolicyConfig("webhook", { url: "https://localhost/hook" })).toContain(
+        "private",
+      );
+      expect(validatePolicyConfig("webhook", { url: "https://127.0.0.1/hook" })).toContain(
+        "private",
+      );
+      expect(validatePolicyConfig("webhook", { url: "https://169.254.169.254/latest" })).toContain(
+        "private",
+      );
+    });
+    it("rejects invalid url", () => {
+      expect(validatePolicyConfig("webhook", { url: "not-a-url" })).toContain("valid URL");
+    });
   });
 
   it("rejects unknown type", () => {
@@ -349,19 +368,10 @@ describe("evaluatePolicies", () => {
   });
 
   describe("priority ordering", () => {
-    it("evaluates policies in priority order", async () => {
+    it("evaluates policies in the order returned by findMany (DB sorts by priority)", async () => {
+      // findMany is called with orderBy: { priority: "asc" } — the mock returns
+      // items in priority order (1, then 10) to mirror what the DB would do
       const prisma = mockPrisma([
-        {
-          id: "2",
-          name: "second",
-          type: "regex",
-          config: { pattern: "x" },
-          action: "info",
-          priority: 10,
-          active: true,
-          scopeChannel: null,
-          scopeContentType: null,
-        },
         {
           id: "1",
           name: "first",
@@ -373,10 +383,21 @@ describe("evaluatePolicies", () => {
           scopeChannel: null,
           scopeContentType: null,
         },
+        {
+          id: "2",
+          name: "second",
+          type: "regex",
+          config: { pattern: "x" },
+          action: "info",
+          priority: 10,
+          active: true,
+          scopeChannel: null,
+          scopeContentType: null,
+        },
       ]);
       const results = await evaluatePolicies(prisma, { content: "x", metadata: {} });
-      expect(results[0].policyName).toBe("second");
-      expect(results[1].policyName).toBe("first");
+      expect(results[0].policyName).toBe("first");
+      expect(results[1].policyName).toBe("second");
     });
   });
 

@@ -38,6 +38,14 @@ export function createPolicyRouter(prisma: PrismaClient): Router {
       return;
     }
 
+    if (
+      priority !== undefined &&
+      (typeof priority !== "number" || !Number.isFinite(priority) || !Number.isInteger(priority))
+    ) {
+      res.status(400).json({ error: "bad_request", message: "priority must be an integer" });
+      return;
+    }
+
     const configError = validatePolicyConfig(type, config);
     if (configError) {
       res.status(400).json({ error: "bad_request", message: configError });
@@ -143,16 +151,28 @@ export function createPolicyRouter(prisma: PrismaClient): Router {
         priority?: number;
       };
 
+    if (name !== undefined && (typeof name !== "string" || name.trim().length === 0)) {
+      res.status(400).json({ error: "bad_request", message: "name must be a non-empty string" });
+      return;
+    }
+    if (
+      priority !== undefined &&
+      (typeof priority !== "number" || !Number.isFinite(priority) || !Number.isInteger(priority))
+    ) {
+      res.status(400).json({ error: "bad_request", message: "priority must be an integer" });
+      return;
+    }
+
     const updatedType = type ?? existing.type;
     const updatedConfig = config ?? existing.config;
 
-    if (type && !POLICY_TYPES.includes(type as (typeof POLICY_TYPES)[number])) {
+    if (type !== undefined && !POLICY_TYPES.includes(type as (typeof POLICY_TYPES)[number])) {
       res
         .status(400)
         .json({ error: "bad_request", message: `type must be one of: ${POLICY_TYPES.join(", ")}` });
       return;
     }
-    if (action && !VALID_ACTIONS.includes(action as (typeof VALID_ACTIONS)[number])) {
+    if (action !== undefined && !VALID_ACTIONS.includes(action as (typeof VALID_ACTIONS)[number])) {
       res.status(400).json({
         error: "bad_request",
         message: `action must be one of: ${VALID_ACTIONS.join(", ")}`,
