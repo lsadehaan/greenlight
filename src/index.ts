@@ -12,6 +12,7 @@ import { createSubmissionRouter } from "./routes/submissions.js";
 import { createReviewRouter, createReviewActionsRouter } from "./routes/reviews.js";
 import { createFeedbackRouter } from "./routes/feedback.js";
 import { createAuditRouter } from "./routes/audit.js";
+import { createGuardrailRouter } from "./routes/guardrails.js";
 import { createWebhookQueue, createWebhookWorker } from "./workers/webhook.js";
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl });
@@ -38,6 +39,7 @@ app.use("/api/v1/submissions", createSubmissionRouter(prisma, webhookQueue));
 app.use("/api/v1/submissions", createReviewRouter(prisma, webhookQueue));
 app.use("/api/v1/submissions", createFeedbackRouter(prisma));
 app.use("/api/v1/audit", createAuditRouter(prisma));
+app.use("/api/v1/guardrails", createGuardrailRouter(prisma));
 
 async function start(): Promise<void> {
   const worker = createWebhookWorker(prisma, config.redisUrl);
