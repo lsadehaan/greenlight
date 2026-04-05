@@ -13,7 +13,8 @@ export type AuditEventType =
   | "webhook.failed"
   | "notification.delivered"
   | "notification.failed"
-  | "escalation.triggered";
+  | "escalation.triggered"
+  | "review_config.updated";
 
 export type AuditActorType = "human" | "ai" | "system" | "guardrail";
 
