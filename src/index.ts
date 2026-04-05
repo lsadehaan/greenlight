@@ -10,6 +10,7 @@ import { createApiKeyRouter } from "./routes/api-keys.js";
 import { createPolicyRouter } from "./routes/policies.js";
 import { createSubmissionRouter } from "./routes/submissions.js";
 import { createReviewRouter, createReviewActionsRouter } from "./routes/reviews.js";
+import { createFeedbackRouter } from "./routes/feedback.js";
 import { createWebhookQueue, createWebhookWorker } from "./workers/webhook.js";
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl });
@@ -34,6 +35,7 @@ app.use("/api/v1/api-keys", createApiKeyRouter(prisma));
 app.use("/api/v1/policies", createPolicyRouter(prisma));
 app.use("/api/v1/submissions", createSubmissionRouter(prisma, webhookQueue));
 app.use("/api/v1/submissions", createReviewRouter(prisma, webhookQueue));
+app.use("/api/v1/submissions", createFeedbackRouter(prisma));
 
 async function start(): Promise<void> {
   const worker = createWebhookWorker(prisma, config.redisUrl);
