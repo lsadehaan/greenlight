@@ -5,6 +5,8 @@ import { evaluatePipeline } from "../engine/pipeline.js";
 import type { AIReviewJobData } from "../workers/ai-review.js";
 import type { WebhookJobData } from "../workers/webhook.js";
 import { enqueueWebhook } from "../workers/webhook.js";
+import type { NotificationJobData } from "../workers/notification.js";
+import { notifyReviewers } from "../services/notification.js";
 import { recordAuditEvent } from "../services/audit.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -13,6 +15,7 @@ export function createSubmissionRouter(
   prisma: PrismaClient,
   webhookQueue?: Queue<WebhookJobData>,
   aiReviewQueue?: Queue<AIReviewJobData>,
+  notificationQueue?: Queue<NotificationJobData>,
 ): Router {
   const router = Router();
 
@@ -242,6 +245,24 @@ export function createSubmissionRouter(
       response.review_url = `/api/v1/submissions/${submission.id}/reviews`;
       if (pipeline.aiEnqueued) {
         response.ai_review_pending = true;
+      } else if (notificationQueue) {
+        // Human review tier — notify reviewers (best-effort)
+        try {
+          await notifyReviewers(
+            prisma,
+            notificationQueue,
+            {
+              id: submission.id,
+              content: content as unknown,
+              channel: channel.trim(),
+              contentType: content_type.trim(),
+            },
+            policyResults,
+            guardrailResults,
+          );
+        } catch {
+          // Best-effort notification
+        }
       }
     }
 

@@ -11,4 +11,10 @@ export const config = {
   nodeEnv: process.env.NODE_ENV || "development",
   version: pkg.version,
   webhookSecret: process.env.WEBHOOK_SECRET || "greenlight-dev-secret",
+  smtpHost: process.env.SMTP_HOST || "",
+  smtpPort: parseInt(process.env.SMTP_PORT || "587", 10),
+  smtpUser: process.env.SMTP_USER || "",
+  smtpPass: process.env.SMTP_PASS || "",
+  smtpFrom: process.env.SMTP_FROM || "noreply@greenlight.local",
+  appBaseUrl: process.env.APP_BASE_URL || "http://localhost:3000",
 };
