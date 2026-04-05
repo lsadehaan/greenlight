@@ -14,9 +14,11 @@ import { createFeedbackRouter } from "./routes/feedback.js";
 import { createAuditRouter } from "./routes/audit.js";
 import { createGuardrailRouter } from "./routes/guardrails.js";
 import { createNotificationChannelRouter } from "./routes/notification-channels.js";
+import { createEscalationConfigRouter } from "./routes/escalation-config.js";
 import { createWebhookQueue, createWebhookWorker } from "./workers/webhook.js";
 import { createAIReviewQueue, createAIReviewWorker } from "./workers/ai-review.js";
 import { createNotificationQueue, createNotificationWorker } from "./workers/notification.js";
+import { createEscalationWorker } from "./workers/escalation.js";
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl });
 const adapter = new PrismaPg(pool);
@@ -49,6 +51,7 @@ app.use("/api/v1/submissions", createFeedbackRouter(prisma));
 app.use("/api/v1/audit", createAuditRouter(prisma));
 app.use("/api/v1/guardrails", createGuardrailRouter(prisma));
 app.use("/api/v1/notification-channels", createNotificationChannelRouter(prisma));
+app.use("/api/v1/escalation-config", createEscalationConfigRouter(prisma));
 
 async function start(): Promise<void> {
   const worker = createWebhookWorker(prisma, config.redisUrl);
@@ -70,6 +73,14 @@ async function start(): Promise<void> {
     config.appBaseUrl,
   );
   console.log(`Notification worker started (queue: ${notifWorker.name})`);
+
+  const escalationWorker = createEscalationWorker(
+    prisma,
+    config.redisUrl,
+    notificationQueue,
+    webhookQueue,
+  );
+  console.log(`Escalation worker started (queue: ${escalationWorker.name})`);
 
   app.listen(config.port, () => {
     console.log(`Greenlight API listening on port ${config.port}`);
