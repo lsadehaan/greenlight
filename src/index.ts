@@ -1,4 +1,6 @@
 import express from "express";
+import cors from "cors";
+import helmet from "helmet";
 import pg from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/prisma/client.js";
@@ -36,6 +38,8 @@ const aiReviewQueue = createAIReviewQueue(config.redisUrl);
 const notificationQueue = createNotificationQueue(config.redisUrl);
 
 const app = express();
+app.use(helmet({ contentSecurityPolicy: false }));
+app.use(cors());
 app.use(express.json());
 
 // Public routes (no auth)
@@ -69,6 +73,22 @@ app.post("/api/v1/admin/retention/trigger", async (_req, res) => {
   const result = await runCleanup(prisma, config.dataRetentionDays);
   res.json({ triggered: true, ...result });
 });
+
+// JSON parse error handler (#42)
+app.use(
+  (
+    err: Error,
+    _req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
+    if ((err as any).type === "entity.parse.failed") {
+      res.status(400).json({ error: "bad_request", message: "Invalid JSON" });
+      return;
+    }
+    next(err);
+  },
+);
 
 async function start(): Promise<void> {
   const worker = createWebhookWorker(prisma, config.redisUrl);
