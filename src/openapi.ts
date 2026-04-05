@@ -61,9 +61,12 @@ export const openapiSpec: Record<string, any> = {
         properties: {
           id: { type: "string", format: "uuid" },
           name: { type: "string", example: "profanity-filter" },
-          description: { type: "string" },
           type: { type: "string", example: "keyword" },
           config: { type: "object" },
+          action: { type: "string", enum: ["block", "flag", "info"] },
+          scope_channel: { type: "string", nullable: true },
+          scope_content_type: { type: "string", nullable: true },
+          priority: { type: "integer", default: 0 },
           active: { type: "boolean" },
           created_at: { type: "string", format: "date-time" },
         },
@@ -73,10 +76,14 @@ export const openapiSpec: Record<string, any> = {
         properties: {
           id: { type: "string", format: "uuid" },
           name: { type: "string", example: "toxicity-detector" },
-          type: { type: "string" },
-          endpoint: { type: "string" },
-          config: { type: "object" },
+          endpoint_url: { type: "string", example: "https://guardrail.example.com/check" },
+          timeout_ms: { type: "integer", default: 10000 },
+          failure_mode: { type: "string", enum: ["fail_open", "fail_closed"] },
+          pipeline_order: { type: "integer" },
+          scope_channel: { type: "string", nullable: true },
+          scope_content_type: { type: "string", nullable: true },
           active: { type: "boolean" },
+          created_at: { type: "string", format: "date-time" },
         },
       },
       ReviewConfig: {
@@ -273,7 +280,7 @@ export const openapiSpec: Record<string, any> = {
       post: {
         tags: ["Policies"],
         summary: "Create a policy",
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["name", "type", "config"], properties: { name: { type: "string" }, description: { type: "string" }, type: { type: "string" }, config: { type: "object" }, active: { type: "boolean" } } } } } },
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["name", "type", "config", "action"], properties: { name: { type: "string" }, type: { type: "string" }, config: { type: "object" }, action: { type: "string", enum: ["block", "flag", "info"] }, scope_channel: { type: "string" }, scope_content_type: { type: "string" }, priority: { type: "integer" }, active: { type: "boolean" } } } } } },
         responses: { "201": { description: "Policy created", content: { "application/json": { schema: { $ref: "#/components/schemas/Policy" } } } }, "400": { description: "Validation error" } },
       },
       get: {
@@ -284,16 +291,16 @@ export const openapiSpec: Record<string, any> = {
     },
     "/api/v1/policies/{id}": {
       get: { tags: ["Policies"], summary: "Get policy by ID", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }], responses: { "200": { description: "Policy detail" }, "404": { description: "Not found" } } },
-      put: { tags: ["Policies"], summary: "Update a policy", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" }, description: { type: "string" }, type: { type: "string" }, config: { type: "object" }, active: { type: "boolean" } } } } } }, responses: { "200": { description: "Policy updated" }, "404": { description: "Not found" } } },
+      put: { tags: ["Policies"], summary: "Update a policy", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" }, type: { type: "string" }, config: { type: "object" }, action: { type: "string", enum: ["block", "flag", "info"] }, scope_channel: { type: "string" }, scope_content_type: { type: "string" }, priority: { type: "integer" }, active: { type: "boolean" } } } } } }, responses: { "200": { description: "Policy updated" }, "404": { description: "Not found" } } },
       delete: { tags: ["Policies"], summary: "Delete a policy", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }], responses: { "200": { description: "Policy deleted" }, "404": { description: "Not found" } } },
     },
     "/api/v1/guardrails": {
-      post: { tags: ["Guardrails"], summary: "Create a guardrail", requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["name", "type", "endpoint"], properties: { name: { type: "string" }, type: { type: "string" }, endpoint: { type: "string" }, config: { type: "object" }, active: { type: "boolean" } } } } } }, responses: { "201": { description: "Guardrail created" }, "400": { description: "Validation error" } } },
+      post: { tags: ["Guardrails"], summary: "Create a guardrail", requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["name", "endpoint_url", "failure_mode", "pipeline_order"], properties: { name: { type: "string" }, endpoint_url: { type: "string" }, timeout_ms: { type: "integer", default: 10000 }, failure_mode: { type: "string", enum: ["fail_open", "fail_closed"] }, pipeline_order: { type: "integer" }, scope_channel: { type: "string" }, scope_content_type: { type: "string" }, active: { type: "boolean" } } } } } }, responses: { "201": { description: "Guardrail created" }, "400": { description: "Validation error" } } },
       get: { tags: ["Guardrails"], summary: "List guardrails", responses: { "200": { description: "List of guardrails" } } },
     },
     "/api/v1/guardrails/{id}": {
       get: { tags: ["Guardrails"], summary: "Get guardrail by ID", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }], responses: { "200": { description: "Guardrail detail" }, "404": { description: "Not found" } } },
-      put: { tags: ["Guardrails"], summary: "Update a guardrail", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }], responses: { "200": { description: "Guardrail updated" }, "404": { description: "Not found" } } },
+      put: { tags: ["Guardrails"], summary: "Update a guardrail", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }], requestBody: { required: true, content: { "application/json": { schema: { type: "object", properties: { name: { type: "string" }, endpoint_url: { type: "string" }, timeout_ms: { type: "integer" }, failure_mode: { type: "string", enum: ["fail_open", "fail_closed"] }, pipeline_order: { type: "integer" }, scope_channel: { type: "string" }, scope_content_type: { type: "string" } } } } } }, responses: { "200": { description: "Guardrail updated" }, "404": { description: "Not found" } } },
       delete: { tags: ["Guardrails"], summary: "Delete a guardrail", parameters: [{ name: "id", in: "path", required: true, schema: { type: "string", format: "uuid" } }], responses: { "200": { description: "Guardrail deleted" }, "404": { description: "Not found" } } },
     },
     "/api/v1/review-config": {
