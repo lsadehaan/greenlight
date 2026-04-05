@@ -96,6 +96,7 @@ model Submission {
   callbackStatus String?              @map("callback_status")
   createdAt      DateTime             @default(now()) @map("created_at")
   decidedAt      DateTime?            @map("decided_at")
+  decidedBy      String?              @map("decided_by")
 
   apiKey               ApiKey                @relation(fields: [apiKeyId], references: [id])
   policyEvaluations    PolicyEvaluation[]

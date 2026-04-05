@@ -21,8 +21,7 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: 3 });
 const webhookQueue = createWebhookQueue(config.redisUrl);
-// Exported for use by tiered pipeline integration (issue #12)
-export const aiReviewQueue = createAIReviewQueue(config.redisUrl);
+const aiReviewQueue = createAIReviewQueue(config.redisUrl);
 
 const app = express();
 app.use(express.json());
@@ -38,7 +37,7 @@ app.use("/api/v1", auth);
 // Authenticated routes
 app.use("/api/v1/api-keys", createApiKeyRouter(prisma));
 app.use("/api/v1/policies", createPolicyRouter(prisma));
-app.use("/api/v1/submissions", createSubmissionRouter(prisma, webhookQueue));
+app.use("/api/v1/submissions", createSubmissionRouter(prisma, webhookQueue, aiReviewQueue));
 app.use("/api/v1/submissions", createReviewRouter(prisma, webhookQueue));
 app.use("/api/v1/submissions", createFeedbackRouter(prisma));
 app.use("/api/v1/audit", createAuditRouter(prisma));

@@ -210,6 +210,7 @@ export async function processAIReviewJob(
         data: {
           status: finalDecision,
           decidedAt: new Date(),
+          decidedBy: "ai",
         },
       });
     }
