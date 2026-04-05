@@ -1,6 +1,5 @@
 import { Queue, Worker } from "bullmq";
 import type { PrismaClient } from "../generated/prisma/client.js";
-import { Prisma } from "../generated/prisma/client.js";
 import { recordAuditEvent } from "../services/audit.js";
 
 export const RETENTION_QUEUE_NAME = "data-retention";
@@ -55,40 +54,38 @@ export async function runCleanup(
 
   const result: CleanupResult = { submissions: 0, auditEvents: 0 };
 
-  // Delete expired submissions in batches (excluding pending)
-  // Cascade: policy_evaluations, guardrail_evaluations, reviews, feedback, audit_events
-  // are linked via FK but Prisma doesn't cascade by default, so delete children first.
+  // Delete expired submissions in batches (excluding pending).
+  // Uses interactive transaction so findMany + deleteMany are atomic,
+  // preventing TOCTOU races if child records are inserted concurrently.
   let hasMore = true;
   while (hasMore) {
-    const batch = await prisma.submission.findMany({
-      where: {
-        createdAt: { lt: cutoff },
-        status: { not: "pending" },
-      },
-      select: { id: true },
-      take: BATCH_SIZE,
+    const deleted = await prisma.$transaction(async (tx) => {
+      const batch = await tx.submission.findMany({
+        where: {
+          createdAt: { lt: cutoff },
+          status: { not: "pending" },
+        },
+        select: { id: true },
+        take: BATCH_SIZE,
+      });
+
+      if (batch.length === 0) return 0;
+
+      const ids = batch.map((s) => s.id);
+
+      // Delete child records then submissions
+      await tx.policyEvaluation.deleteMany({ where: { submissionId: { in: ids } } });
+      await tx.guardrailEvaluation.deleteMany({ where: { submissionId: { in: ids } } });
+      await tx.review.deleteMany({ where: { submissionId: { in: ids } } });
+      await tx.feedback.deleteMany({ where: { submissionId: { in: ids } } });
+      await tx.auditEvent.deleteMany({ where: { submissionId: { in: ids } } });
+      const { count } = await tx.submission.deleteMany({ where: { id: { in: ids } } });
+      return count;
     });
 
-    if (batch.length === 0) {
-      hasMore = false;
-      break;
-    }
+    result.submissions += deleted;
 
-    const ids = batch.map((s) => s.id);
-
-    // Delete child records then submissions in a transaction
-    await prisma.$transaction([
-      prisma.policyEvaluation.deleteMany({ where: { submissionId: { in: ids } } }),
-      prisma.guardrailEvaluation.deleteMany({ where: { submissionId: { in: ids } } }),
-      prisma.review.deleteMany({ where: { submissionId: { in: ids } } }),
-      prisma.feedback.deleteMany({ where: { submissionId: { in: ids } } }),
-      prisma.auditEvent.deleteMany({ where: { submissionId: { in: ids } } }),
-      prisma.submission.deleteMany({ where: { id: { in: ids } } }),
-    ]);
-
-    result.submissions += batch.length;
-
-    if (batch.length < BATCH_SIZE) {
+    if (deleted < BATCH_SIZE) {
       hasMore = false;
     }
   }

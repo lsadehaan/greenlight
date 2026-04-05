@@ -3,25 +3,17 @@ import { runCleanup } from "./retention.js";
 
 const now = new Date("2026-04-05T12:00:00Z");
 const retentionDays = 90;
-const cutoff = new Date(now);
-cutoff.setDate(cutoff.getDate() - retentionDays);
 
 // Submissions older than cutoff
 const oldApproved = { id: "old-1" };
 const oldRejected = { id: "old-2" };
-// Pending submission older than cutoff — should NOT be deleted
-const oldPending = { id: "old-pending" };
-// Recent submission — should NOT be deleted
-const recent = { id: "recent-1" };
 
 function createMockPrisma() {
-  const mockTx = vi.fn().mockResolvedValue(undefined);
-
-  return {
+  const base = {
     submission: {
       findMany: vi.fn()
         .mockResolvedValueOnce([oldApproved, oldRejected])
-        .mockResolvedValueOnce([]), // second batch empty → stop
+        .mockResolvedValueOnce([]),
       deleteMany: vi.fn().mockResolvedValue({ count: 2 }),
     },
     policyEvaluation: { deleteMany: vi.fn().mockResolvedValue({ count: 2 }) },
@@ -32,9 +24,17 @@ function createMockPrisma() {
       deleteMany: vi.fn().mockResolvedValue({ count: 2 }),
       create: vi.fn().mockResolvedValue({}),
     },
-    $transaction: mockTx,
-    $executeRaw: vi.fn().mockResolvedValueOnce(0), // no orphaned audit events
+    // Interactive transaction: receives a callback, passes `tx` (which is the same mock)
+    $transaction: vi.fn(),
+    $executeRaw: vi.fn().mockResolvedValueOnce(0),
   };
+
+  // $transaction calls the callback with the mock itself as the tx client
+  base.$transaction.mockImplementation(
+    async (fn: (tx: typeof base) => Promise<unknown>) => fn(base),
+  );
+
+  return base;
 }
 
 describe("runCleanup", () => {
@@ -45,14 +45,11 @@ describe("runCleanup", () => {
 
   it("deletes expired non-pending submissions in batches", async () => {
     const prisma = createMockPrisma();
-    // Make $transaction execute the batch operations array
-    prisma.$transaction.mockImplementation(async (ops: unknown[]) => ops);
-
     const result = await runCleanup(prisma as any, retentionDays);
 
     expect(result.submissions).toBe(2);
 
-    // Verify findMany was called with correct filters
+    // Verify findMany was called with correct filters inside the transaction
     const findCall = prisma.submission.findMany.mock.calls[0][0];
     expect(findCall.where.createdAt.lt).toBeInstanceOf(Date);
     expect(findCall.where.status.not).toBe("pending");
@@ -61,11 +58,8 @@ describe("runCleanup", () => {
 
   it("excludes pending submissions from deletion", async () => {
     const prisma = createMockPrisma();
-    prisma.$transaction.mockImplementation(async (ops: unknown[]) => ops);
-
     await runCleanup(prisma as any, retentionDays);
 
-    // Every findMany call should exclude pending
     for (const call of prisma.submission.findMany.mock.calls) {
       expect(call[0].where.status.not).toBe("pending");
     }
@@ -73,24 +67,20 @@ describe("runCleanup", () => {
 
   it("deletes child records before submissions in transaction", async () => {
     const prisma = createMockPrisma();
-    const txOps: unknown[] = [];
-    prisma.$transaction.mockImplementation(async (ops: unknown[]) => {
-      txOps.push(...ops);
-      return ops;
-    });
-
     await runCleanup(prisma as any, retentionDays);
 
-    // Transaction should have been called with 6 operations
-    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Array));
-    const txCall = prisma.$transaction.mock.calls[0][0];
-    expect(txCall).toHaveLength(6);
+    // Transaction should have been called (interactive transaction with callback)
+    expect(prisma.$transaction).toHaveBeenCalled();
+
+    // Inside the transaction, child deletions happen before submission deletion
+    // Verify the order via call order tracking
+    const policyDeleteOrder = prisma.policyEvaluation.deleteMany.mock.invocationCallOrder[0];
+    const subDeleteOrder = prisma.submission.deleteMany.mock.invocationCallOrder[0];
+    expect(policyDeleteOrder).toBeLessThan(subDeleteOrder);
   });
 
   it("deletes orphaned audit events via $executeRaw", async () => {
     const prisma = createMockPrisma();
-    prisma.$transaction.mockImplementation(async (ops: unknown[]) => ops);
-
     await runCleanup(prisma as any, retentionDays);
 
     expect(prisma.$executeRaw).toHaveBeenCalled();
@@ -98,8 +88,6 @@ describe("runCleanup", () => {
 
   it("records audit event after cleanup", async () => {
     const prisma = createMockPrisma();
-    prisma.$transaction.mockImplementation(async (ops: unknown[]) => ops);
-
     await runCleanup(prisma as any, retentionDays);
 
     expect(prisma.auditEvent.create).toHaveBeenCalledWith(
@@ -115,27 +103,25 @@ describe("runCleanup", () => {
 
   it("returns zero when no expired records exist", async () => {
     const prisma = createMockPrisma();
+    // Override: first transaction call returns 0 (empty batch)
     prisma.submission.findMany = vi.fn().mockResolvedValue([]);
-    prisma.$transaction.mockImplementation(async (ops: unknown[]) => ops);
 
     const result = await runCleanup(prisma as any, retentionDays);
 
     expect(result.submissions).toBe(0);
     expect(result.auditEvents).toBe(0);
-    // No transaction should have been called (no submissions to delete)
-    expect(prisma.$transaction).not.toHaveBeenCalled();
   });
 
   it("handles multiple batches", async () => {
     const prisma = createMockPrisma();
-    // First batch returns 1000 items (full batch → continue), second returns 500 (partial → stop)
     const fullBatch = Array.from({ length: 1000 }, (_, i) => ({ id: `s-${i}` }));
     const partialBatch = Array.from({ length: 500 }, (_, i) => ({ id: `s-${1000 + i}` }));
     prisma.submission.findMany = vi.fn()
       .mockResolvedValueOnce(fullBatch)
-      .mockResolvedValueOnce(partialBatch)
-      .mockResolvedValueOnce([]); // shouldn't be reached
-    prisma.$transaction.mockImplementation(async (ops: unknown[]) => ops);
+      .mockResolvedValueOnce(partialBatch);
+    prisma.submission.deleteMany = vi.fn()
+      .mockResolvedValueOnce({ count: 1000 })
+      .mockResolvedValueOnce({ count: 500 });
 
     const result = await runCleanup(prisma as any, retentionDays);
 
@@ -146,7 +132,6 @@ describe("runCleanup", () => {
   it("uses configured retention days for cutoff", async () => {
     const prisma = createMockPrisma();
     prisma.submission.findMany = vi.fn().mockResolvedValue([]);
-    prisma.$transaction.mockImplementation(async (ops: unknown[]) => ops);
 
     await runCleanup(prisma as any, 30);
 
