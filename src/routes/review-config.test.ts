@@ -48,6 +48,13 @@ function baseMocks() {
           updatedAt: new Date("2026-04-05T01:00:00Z"),
         }),
       ),
+      upsert: vi.fn().mockImplementation(
+        async ({ update: data }: { update: Record<string, unknown> }) => ({
+          ...defaultConfig,
+          ...data,
+          updatedAt: new Date("2026-04-05T01:00:00Z"),
+        }),
+      ),
     },
     auditEvent: {
       create: vi.fn().mockResolvedValue({}),
@@ -102,17 +109,18 @@ describe("PUT /api/v1/review-config", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(mocks.reviewConfig.update).toHaveBeenCalledOnce();
-    const updateData = mocks.reviewConfig.update.mock.calls[0][0].data;
+    expect(mocks.reviewConfig.upsert).toHaveBeenCalledOnce();
+    const updateData = mocks.reviewConfig.upsert.mock.calls[0][0].update;
     expect(updateData.defaultReviewMode).toBe("ai_then_human");
     expect(updateData.aiConfidenceThreshold).toBe(0.7);
     expect(updateData.aiReviewerEndpoint).toBe("http://localhost:9999/review");
     expect(updateData.aiReviewerModel).toBe("gpt-4o");
+    // Stored keys match pipeline expectations: ai/human (not ai_review/human_review)
     expect(updateData.tierConfig).toEqual({
       rules: true,
       guardrails: true,
-      ai_review: true,
-      human_review: true,
+      ai: true,
+      human: true,
     });
   });
 
@@ -234,7 +242,7 @@ describe("PUT /api/v1/review-config", () => {
       ai_confidence_threshold: 0.5,
     });
 
-    const updateData = mocks.reviewConfig.update.mock.calls[0][0].data;
+    const updateData = mocks.reviewConfig.upsert.mock.calls[0][0].update;
     expect(updateData).toEqual({ aiConfidenceThreshold: 0.5 });
     expect(updateData.defaultReviewMode).toBeUndefined();
   });

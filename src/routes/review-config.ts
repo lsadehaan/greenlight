@@ -82,26 +82,36 @@ export function createReviewConfigRouter(prisma: PrismaClient): Router {
     }
     if (body.tiers_enabled !== undefined) {
       const tiers = body.tiers_enabled as Record<string, boolean>;
+      // Store with keys the pipeline reads: rules, guardrails, ai, human
       data.tierConfig = {
         rules: tiers.rules !== false,
         guardrails: tiers.guardrails === true,
-        ai_review: tiers.ai_review === true,
-        human_review: tiers.human_review !== false,
+        ai: tiers.ai_review === true,
+        human: tiers.human_review !== false,
       };
     }
 
-    const config = await prisma.reviewConfig.update({
+    // Upsert to handle missing singleton gracefully
+    const config = await prisma.reviewConfig.upsert({
       where: { id: SINGLETON_ID },
-      data,
+      update: data,
+      create: {
+        id: SINGLETON_ID,
+        defaultReviewMode: "human_only",
+        aiConfidenceThreshold: 0.8,
+        aiReviewerTimeoutMs: 10000,
+        guardrailPipelineEnabled: false,
+        ...data,
+      },
     });
 
-    // Audit the config change
+    // Audit the persisted config change (not raw request body)
     try {
       await recordAuditEvent(prisma, {
         eventType: "review_config.updated",
         actorType: "human",
         actor: req.apiKey?.name ?? "unknown",
-        payload: body as Record<string, unknown>,
+        payload: data,
       });
     } catch {
       // Best-effort
@@ -130,7 +140,7 @@ function validateUpdate(body: Record<string, unknown>): string | null {
 
   if (body.ai_reviewer_timeout_ms !== undefined) {
     const val = body.ai_reviewer_timeout_ms;
-    if (typeof val !== "number" || val < 1) {
+    if (typeof val !== "number" || !Number.isInteger(val) || val < 1) {
       return "ai_reviewer_timeout_ms must be a positive integer";
     }
   }
@@ -154,7 +164,7 @@ function validateUpdate(body: Record<string, unknown>): string | null {
   }
 
   if (body.tiers_enabled !== undefined) {
-    if (typeof body.tiers_enabled !== "object" || body.tiers_enabled === null) {
+    if (typeof body.tiers_enabled !== "object" || body.tiers_enabled === null || Array.isArray(body.tiers_enabled)) {
       return "tiers_enabled must be an object";
     }
   }
@@ -184,8 +194,8 @@ function formatConfig(config: {
     tiers_enabled: {
       rules: tiers?.rules !== false,
       guardrails: tiers?.guardrails === true,
-      ai_review: tiers?.ai_review === true,
-      human_review: tiers?.human_review !== false,
+      ai_review: tiers?.ai === true,
+      human_review: tiers?.human !== false,
     },
     updated_at: config.updatedAt.toISOString(),
   };
