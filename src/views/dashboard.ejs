@@ -1,0 +1,172 @@
+<style>
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .metric-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; text-align: center; }
+  .metric-card .value { font-size: 28px; font-weight: 700; color: #1a1a1a; }
+  .metric-card .label { font-size: 13px; color: #6b7280; margin-top: 4px; }
+  .section { margin-bottom: 24px; }
+  .section h2 { font-size: 16px; font-weight: 600; margin-bottom: 12px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+  table.data-table { width: 100%; border-collapse: collapse; font-size: 14px; background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+  table.data-table th, table.data-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #f3f4f6; }
+  table.data-table th { background: #f9fafb; font-weight: 600; color: #6b7280; font-size: 12px; text-transform: uppercase; }
+  .bar-container { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .bar { height: 20px; border-radius: 4px; min-width: 2px; }
+  .bar-label { font-size: 13px; min-width: 120px; }
+  .bar-value { font-size: 13px; color: #6b7280; }
+  .funnel-item { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px; }
+  .funnel-item:last-child { border-bottom: none; }
+  .chart-placeholder { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px; }
+  .refresh-note { font-size: 12px; color: #9ca3af; text-align: right; margin-bottom: 8px; }
+</style>
+
+<div class="refresh-note">Auto-refreshes every 30s</div>
+
+<!-- Summary Metrics -->
+<div class="grid">
+  <div class="metric-card">
+    <div class="value"><%= data.total_submissions %></div>
+    <div class="label">Total Submissions</div>
+  </div>
+  <div class="metric-card">
+    <div class="value" style="color:#16a34a"><%= data.approved %></div>
+    <div class="label">Approved</div>
+  </div>
+  <div class="metric-card">
+    <div class="value" style="color:#dc2626"><%= data.rejected %></div>
+    <div class="label">Rejected</div>
+  </div>
+  <div class="metric-card">
+    <div class="value" style="color:#ca8a04"><%= data.pending %></div>
+    <div class="label">Pending</div>
+  </div>
+  <div class="metric-card">
+    <div class="value"><%= (data.approval_rate * 100).toFixed(1) %>%</div>
+    <div class="label">Approval Rate</div>
+  </div>
+  <div class="metric-card">
+    <div class="value"><%= data.avg_review_time_seconds.toFixed(0) %>s</div>
+    <div class="label">Avg Review Time</div>
+  </div>
+  <div class="metric-card">
+    <div class="value"><%= (data.sla_compliance_rate * 100).toFixed(1) %>%</div>
+    <div class="label">SLA Compliance</div>
+  </div>
+</div>
+
+<!-- Review Tier Funnel -->
+<div class="section">
+  <h2>Review Tier Funnel</h2>
+  <div class="card" style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px">
+    <% var funnel = data.review_tier_funnel; %>
+    <% var funnelItems = [
+      { label: 'Auto-approved by rules', value: funnel.auto_approved_by_rules, color: '#16a34a' },
+      { label: 'Auto-rejected by rules', value: funnel.auto_rejected_by_rules, color: '#dc2626' },
+      { label: 'Cleared by guardrails', value: funnel.cleared_by_guardrails, color: '#16a34a' },
+      { label: 'Rejected by guardrails', value: funnel.rejected_by_guardrails, color: '#dc2626' },
+      { label: 'Cleared by AI review', value: funnel.cleared_by_ai_review, color: '#2563eb' },
+      { label: 'Rejected by AI review', value: funnel.rejected_by_ai_review, color: '#dc2626' },
+      { label: 'Escalated to human', value: funnel.escalated_to_human, color: '#ca8a04' },
+      { label: 'Decided by human', value: funnel.decided_by_human, color: '#7c3aed' },
+    ]; %>
+    <% funnelItems.forEach(function(item) { %>
+      <div class="funnel-item">
+        <span><%= item.label %></span>
+        <strong><%= item.value %></strong>
+      </div>
+    <% }); %>
+  </div>
+</div>
+
+<!-- Top Rejection Reasons -->
+<% if (data.top_rejection_reasons.length > 0) { %>
+<div class="section">
+  <h2>Top Rejection Reasons</h2>
+  <div class="chart-placeholder">
+    <% var maxCount = Math.max(...data.top_rejection_reasons.map(function(r) { return r.count; })); %>
+    <% data.top_rejection_reasons.forEach(function(r) { %>
+      <div class="bar-container">
+        <span class="bar-label"><%= r.reason %></span>
+        <div class="bar" style="background:#ef4444;width:<%= (r.count / maxCount * 200) %>px"></div>
+        <span class="bar-value"><%= r.count %></span>
+      </div>
+    <% }); %>
+  </div>
+</div>
+<% } %>
+
+<!-- Channel Breakdown -->
+<% var channels = Object.keys(data.by_channel); %>
+<% if (channels.length > 0) { %>
+<div class="section">
+  <h2>Channel Breakdown</h2>
+  <table class="data-table">
+    <thead><tr><th>Channel</th><th>Total</th><th>Approved</th><th>Rejected</th><th>Pending</th></tr></thead>
+    <tbody>
+      <% channels.forEach(function(ch) { var c = data.by_channel[ch]; %>
+        <tr><td><%= ch %></td><td><%= c.total %></td><td><%= c.approved %></td><td><%= c.rejected %></td><td><%= c.pending %></td></tr>
+      <% }); %>
+    </tbody>
+  </table>
+</div>
+<% } %>
+
+<!-- AI Review Stats -->
+<div class="section">
+  <h2>AI Review Stats</h2>
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr))">
+    <div class="metric-card">
+      <div class="value"><%= data.ai_review_stats.total_ai_reviews %></div>
+      <div class="label">Total AI Reviews</div>
+    </div>
+    <div class="metric-card">
+      <div class="value"><%= (data.ai_review_stats.avg_ai_confidence * 100).toFixed(1) %>%</div>
+      <div class="label">Avg Confidence</div>
+    </div>
+    <div class="metric-card">
+      <div class="value"><%= (data.ai_review_stats.ai_escalation_rate * 100).toFixed(1) %>%</div>
+      <div class="label">Escalation Rate</div>
+    </div>
+  </div>
+</div>
+
+<!-- Guardrail Stats -->
+<% var guardrails = Object.keys(data.guardrail_stats.by_guardrail); %>
+<% if (guardrails.length > 0) { %>
+<div class="section">
+  <h2>Guardrail Health</h2>
+  <table class="data-table">
+    <thead><tr><th>Guardrail</th><th>Pass</th><th>Fail</th><th>Flag</th></tr></thead>
+    <tbody>
+      <% guardrails.forEach(function(name) { var g = data.guardrail_stats.by_guardrail[name]; %>
+        <tr><td><%= name %></td><td><%= g.pass %></td><td><%= g.fail %></td><td><%= g.flag %></td></tr>
+      <% }); %>
+    </tbody>
+  </table>
+</div>
+<% } %>
+
+<!-- Feedback Summary -->
+<div class="section">
+  <h2>Feedback Summary</h2>
+  <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(120px, 1fr))">
+    <div class="metric-card">
+      <div class="value"><%= data.feedback_summary.total %></div>
+      <div class="label">Total</div>
+    </div>
+    <div class="metric-card">
+      <div class="value" style="color:#16a34a"><%= data.feedback_summary.positive %></div>
+      <div class="label">Positive</div>
+    </div>
+    <div class="metric-card">
+      <div class="value" style="color:#dc2626"><%= data.feedback_summary.negative %></div>
+      <div class="label">Negative</div>
+    </div>
+    <div class="metric-card">
+      <div class="value" style="color:#6b7280"><%= data.feedback_summary.neutral %></div>
+      <div class="label">Neutral</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  setTimeout(function() { location.reload(); }, 30000);
+</script>

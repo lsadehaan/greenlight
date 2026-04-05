@@ -16,6 +16,8 @@ import { createGuardrailRouter } from "./routes/guardrails.js";
 import { createNotificationChannelRouter } from "./routes/notification-channels.js";
 import { createEscalationConfigRouter } from "./routes/escalation-config.js";
 import { createReviewConfigRouter } from "./routes/review-config.js";
+import { createAnalyticsRouter } from "./routes/analytics.js";
+import { createDashboardRouter } from "./routes/dashboard.js";
 import { createWebhookQueue, createWebhookWorker } from "./workers/webhook.js";
 import { createAIReviewQueue, createAIReviewWorker } from "./workers/ai-review.js";
 import { createNotificationQueue, createNotificationWorker } from "./workers/notification.js";
@@ -37,6 +39,7 @@ app.use(express.json());
 app.use(createHealthRouter(prisma, redis));
 app.use("/api/v1/review-actions", createReviewActionsRouter(prisma, webhookQueue));
 app.use("/review", createReviewUIRouter(prisma, webhookQueue));
+app.use("/dashboard", createDashboardRouter(prisma));
 
 // Auth middleware for all /api/v1/* routes
 const auth = createAuthMiddleware(prisma);
@@ -56,6 +59,7 @@ app.use("/api/v1/guardrails", createGuardrailRouter(prisma));
 app.use("/api/v1/notification-channels", createNotificationChannelRouter(prisma));
 app.use("/api/v1/escalation-config", createEscalationConfigRouter(prisma));
 app.use("/api/v1/review-config", createReviewConfigRouter(prisma));
+app.use("/api/v1/analytics", createAnalyticsRouter(prisma));
 
 async function start(): Promise<void> {
   const worker = createWebhookWorker(prisma, config.redisUrl);
