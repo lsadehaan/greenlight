@@ -15,6 +15,7 @@ import { createAuditRouter } from "./routes/audit.js";
 import { createGuardrailRouter } from "./routes/guardrails.js";
 import { createNotificationChannelRouter } from "./routes/notification-channels.js";
 import { createEscalationConfigRouter } from "./routes/escalation-config.js";
+import { createReviewConfigRouter } from "./routes/review-config.js";
 import { createWebhookQueue, createWebhookWorker } from "./workers/webhook.js";
 import { createAIReviewQueue, createAIReviewWorker } from "./workers/ai-review.js";
 import { createNotificationQueue, createNotificationWorker } from "./workers/notification.js";
@@ -52,6 +53,7 @@ app.use("/api/v1/audit", createAuditRouter(prisma));
 app.use("/api/v1/guardrails", createGuardrailRouter(prisma));
 app.use("/api/v1/notification-channels", createNotificationChannelRouter(prisma));
 app.use("/api/v1/escalation-config", createEscalationConfigRouter(prisma));
+app.use("/api/v1/review-config", createReviewConfigRouter(prisma));
 
 async function start(): Promise<void> {
   const worker = createWebhookWorker(prisma, config.redisUrl);
