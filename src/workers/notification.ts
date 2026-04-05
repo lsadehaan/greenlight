@@ -117,14 +117,13 @@ export async function processNotificationJob(
 
       try {
         await recordAuditEvent(prisma, {
-          eventType: "submission.created",
+          eventType: "notification.delivered",
           submissionId: data.submissionId,
           actor: `notification:${ch.type}`,
           actorType: "system",
           payload: {
             notification_channel_id: ch.id,
             notification_type: ch.type,
-            status: "delivered",
           },
         });
       } catch {
@@ -136,14 +135,13 @@ export async function processNotificationJob(
 
       try {
         await recordAuditEvent(prisma, {
-          eventType: "submission.created",
+          eventType: "notification.failed",
           submissionId: data.submissionId,
           actor: `notification:${ch.type}`,
           actorType: "system",
           payload: {
             notification_channel_id: ch.id,
             notification_type: ch.type,
-            status: "failed",
             error: errorMsg,
           },
         });
