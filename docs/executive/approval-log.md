@@ -4,3 +4,4 @@
 |-----------------|---------|---------------|--------|----------------------------|----------|-------|
 | 2026-04-05T12:00:00Z | greenlight | Executive Brief Published | Telegram / GitHub | `planning -> awaiting-review` | [Executive Brief](./project-brief.md) | Review timeout: 60 minutes, auto-start at 2026-04-05T13:00:00Z |
 | 2026-04-05T01:46:36Z | greenlight | Executive Brief Published | System | `planning -> awaiting-review` | docs/executive/project-brief.md | Review timeout: 60 minutes |
+| 2026-04-05T02:06:40Z | greenlight | Executive Brief Revised | System | `awaiting-review -> awaiting-review` | docs/executive/project-brief.md | Incorporated human feedback: AI review + guardrails. Review timeout: 60 minutes |

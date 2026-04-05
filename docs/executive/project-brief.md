@@ -22,7 +22,7 @@ This should be a no-brainer adoption for any SMB or developer who needs an appro
 - **AI-powered review** -- configurable LLM-based content review that can approve, reject, or escalate to human reviewers. Three review modes: `human_only`, `ai_only`, and `ai_then_human` (AI reviews first, escalates when confidence is below a configurable threshold).
 - **Human review flow** -- notifications via Slack and email with one-click approve/reject action links, plus a minimal web UI as fallback
 - **Tiered evaluation pipeline** -- submissions flow through four tiers: (1) rule-based policies, (2) external guardrail pipeline, (3) AI-based review, (4) human review. Each tier can auto-approve, auto-reject, or escalate to the next. Any tier can be disabled. The pipeline short-circuits early to minimize cost and latency.
-- **Analytics API and dashboard** -- approval rates, review latency, rejection reasons, channel breakdowns, SLA compliance, post-delivery feedback tracking, tier funnel metrics (how many submissions each tier handles), AI review confidence distribution, and per-guardrail pass/fail stats
+- **Analytics API and dashboard** -- the dashboard shows six key views: total submissions, approval rate, average review time, SLA compliance, daily submission volume chart, top rejection reasons, and post-delivery feedback summary (positive/negative/neutral). The API exposes richer data including tier funnel metrics, AI review confidence distribution, and per-guardrail pass/fail stats for programmatic consumers.
 - **Immutable audit trail** -- every submission, policy evaluation, guardrail verdict, AI review decision, human review decision, and feedback event logged with actor type (human/AI/system/guardrail) for compliance
 - **Webhook callbacks** -- approved/rejected decisions delivered to the originating system with HMAC-signed webhooks and retry logic
 - **Self-hostable** -- single Docker container + PostgreSQL + Redis, deployable in under 10 minutes
@@ -68,6 +68,8 @@ graph TD
 
 ## Key Screen Preview
 
+The review queue is the primary screen for human reviewers. Full wireframes for all three screens (Review Queue, Submission Detail with guardrail/AI review context, and Analytics Dashboard) are in the [UX Specification](../ux/ux-spec.md).
+
 <div style="border:1px solid #ccc; padding:0; max-width:800px; font-family:sans-serif; overflow:hidden">
   <div style="background:#1a1a2e; color:white; padding:12px 16px; display:flex; justify-content:space-between; align-items:center">
     <b>Greenlight</b>
@@ -87,22 +89,36 @@ graph TD
           <div style="color:#666; font-size:13px; margin-top:4px">Flagged: keyword_blocklist (contains "guaranteed returns")</div>
         </div>
         <div style="display:flex; gap:8px">
-          <button style="background:#51cf66; color:white; border:none; padding:8px 16px; border-radius:4px">Approve</button>
-          <button style="background:#ff6b6b; color:white; border:none; padding:8px 16px; border-radius:4px">Reject</button>
+          <button style="background:#51cf66; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer">Approve</button>
+          <button style="background:#ff6b6b; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer">Reject</button>
         </div>
       </div>
     </div>
     <div style="border:1px solid #ddd; padding:12px; border-radius:8px; margin-bottom:12px">
       <div style="display:flex; justify-content:space-between; align-items:flex-start">
         <div>
-          <span style="background:#e3e3e3; color:#333; padding:1px 6px; border-radius:4px; font-size:11px">NORMAL</span>
+          <span style="background:#e3e3e3; color:#333; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:bold">NORMAL</span>
           <span style="color:#666; font-size:12px; margin-left:8px">slack &middot; 12 min ago</span>
-          <div style="margin-top:8px; font-size:14px"><b>Customer response -- refund #4821</b></div>
+          <div style="margin-top:8px; font-size:14px"><b>Customer response -- refund request #4821</b></div>
           <div style="color:#666; font-size:13px; margin-top:4px">Flagged: content_length (exceeds 2000 chars)</div>
         </div>
         <div style="display:flex; gap:8px">
-          <button style="background:#51cf66; color:white; border:none; padding:8px 16px; border-radius:4px">Approve</button>
-          <button style="background:#ff6b6b; color:white; border:none; padding:8px 16px; border-radius:4px">Reject</button>
+          <button style="background:#51cf66; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer">Approve</button>
+          <button style="background:#ff6b6b; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer">Reject</button>
+        </div>
+      </div>
+    </div>
+    <div style="border:1px solid #ddd; padding:12px; border-radius:8px; margin-bottom:12px">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start">
+        <div>
+          <span style="background:#e3e3e3; color:#333; padding:1px 6px; border-radius:4px; font-size:11px; font-weight:bold">NORMAL</span>
+          <span style="color:#666; font-size:12px; margin-left:8px">sms &middot; 28 min ago</span>
+          <div style="margin-top:8px; font-size:14px"><b>Appointment reminder batch (47 recipients)</b></div>
+          <div style="color:#666; font-size:13px; margin-top:4px">Flagged: custom_webhook (external compliance check inconclusive)</div>
+        </div>
+        <div style="display:flex; gap:8px">
+          <button style="background:#51cf66; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer">Approve</button>
+          <button style="background:#ff6b6b; color:white; border:none; padding:8px 16px; border-radius:4px; cursor:pointer">Reject</button>
         </div>
       </div>
     </div>

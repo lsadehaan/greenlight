@@ -2,7 +2,7 @@
 
 ## User Flows
 
-### Flow 1: Content Submission (Developer / Automated System)
+### Flow 1: Content Submission (Developer / Automated System) -- REQ-001, REQ-002, REQ-013, REQ-014, REQ-015
 
 ```mermaid
 flowchart TD
@@ -37,7 +37,7 @@ flowchart TD
     F --> T
 ```
 
-### Flow 2: Human Review (Reviewer)
+### Flow 2: Human Review (Reviewer) -- REQ-007, REQ-008, REQ-009
 
 ```mermaid
 flowchart TD
@@ -58,7 +58,7 @@ flowchart TD
 
 **Note:** When a submission arrives via AI escalation (ai_then_human mode), the human reviewer sees the AI's verdict, confidence score, and reasoning alongside the policy flags and guardrail results. This gives the human reviewer full context for their decision.
 
-### Flow 3: Analytics and Feedback (Developer / Ops)
+### Flow 3: Analytics and Feedback (Developer / Ops) -- REQ-004, REQ-005, REQ-010
 
 ```mermaid
 flowchart TD
@@ -76,7 +76,7 @@ flowchart TD
     I -->|Negative feedback on approved items| L["Tighten policy rules"]
 ```
 
-### Flow 4: Policy Configuration (Developer)
+### Flow 4: Policy Configuration (Developer) -- REQ-003
 
 ```mermaid
 flowchart TD
@@ -100,6 +100,7 @@ flowchart TD
 
 ### Screen 1: Review Queue
 
+**Satisfies:** REQ-009, NFR-009
 **Purpose:** Shows all pending submissions that need human review. This is the primary screen for reviewers.
 **Entry points:** Direct link from notification (email/Slack), or navigate to `/review` from nav.
 **Key elements:**
@@ -174,6 +175,7 @@ flowchart TD
 
 ### Screen 2: Submission Detail
 
+**Satisfies:** REQ-008, REQ-009, REQ-013 (AI review display), REQ-014 (guardrail results display), REQ-015 (tiered results)
 **Purpose:** Full view of a single submission with content, policy results, and review controls. Accessed by clicking a submission card.
 **Entry points:** Click submission card in Review Queue, direct link from notification
 **Key elements:**
@@ -275,6 +277,7 @@ We are excited to announce our Q2 product launch with guaranteed returns on your
 
 ### Screen 3: Analytics Dashboard
 
+**Satisfies:** REQ-004 (visual), REQ-005 (feedback display), REQ-010
 **Purpose:** Read-only dashboard showing approval metrics and trends. For operations/compliance monitoring.
 **Entry points:** Navigate to `/dashboard` from nav
 **Key elements:**

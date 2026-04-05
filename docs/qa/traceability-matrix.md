@@ -19,6 +19,9 @@
 | REQ-010 | Dashboard showing approval metrics | -- | -- | -- | -- | Pending |
 | REQ-011 | Immutable audit trail | -- | -- | -- | -- | Pending |
 | REQ-012 | Configure escalation rules | -- | -- | -- | -- | Pending |
+| REQ-013 | Configure AI-based review (modes, thresholds, verdicts) | -- | -- | -- | -- | Pending |
+| REQ-014 | Register external AI guardrail services | -- | -- | -- | -- | Pending |
+| REQ-015 | Tiered evaluation pipeline (rules -> guardrails -> AI -> human) | -- | -- | -- | -- | Pending |
 | NFR-001 | Auto-approve latency < 200ms p95 | -- | -- | -- | -- | Pending |
 | NFR-002 | API availability 99.5% | -- | -- | -- | -- | Pending |
 | NFR-003 | Analytics queries < 500ms on 100k rows | -- | -- | -- | -- | Pending |
@@ -29,15 +32,18 @@
 | NFR-008 | Configurable data retention | -- | -- | -- | -- | Pending |
 | NFR-009 | Review UI usable at 375px | -- | -- | -- | -- | Pending |
 | NFR-010 | Startup time < 5s | -- | -- | -- | -- | Pending |
+| NFR-011 | AI review latency < 5s p95 | -- | -- | -- | -- | Pending |
+| NFR-012 | Guardrail adapter timeout configurable (default 10s, max 30s) | -- | -- | -- | -- | Pending |
+| NFR-013 | Full pipeline (rules + 2 guardrails + AI) < 15s p95 | -- | -- | -- | -- | Pending |
 
 ## Coverage Summary
 
-- **Requirements defined:** 22 (12 functional + 10 non-functional)
+- **Requirements defined:** 28 (15 functional + 13 non-functional)
 - **Requirements with issues:** 0
 - **Requirements with merged PRs:** 0
 - **Requirements with passing tests:** 0
 - **Requirements with passing staging evidence:** 0
-- **Coverage:** 0% (0 / 22)
+- **Coverage:** 0% (0 / 28)
 
 ## Gaps
 

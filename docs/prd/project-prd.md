@@ -18,6 +18,7 @@ Greenlight is an open-source approval and compliance proxy for outbound content.
 - **Not a delivery channel** -- Greenlight does not send emails, SMS, or messages. It approves/rejects content and calls back the originating system.
 - **Not a user management system** -- Greenlight uses API keys for authentication and supports webhook-based reviewer notification. It does not manage user accounts, roles, or SSO (v1).
 - **Not a multi-tenant SaaS platform** -- v1 is single-tenant, self-hosted. Multi-tenancy is deferred.
+- **Not a batch submission system** -- v1 handles one submission per request. Batch API deferred to v2.
 
 ## User Stories
 
