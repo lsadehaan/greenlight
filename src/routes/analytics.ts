@@ -187,6 +187,15 @@ export function createAnalyticsRouter(prisma: PrismaClient): Router {
     const to = req.query.to ? new Date(req.query.to as string) : undefined;
     const policyTriggered = (req.query.policy_triggered as string) || undefined;
 
+    if (from && isNaN(from.getTime())) {
+      res.status(400).json({ error: "bad_request", message: "Invalid 'from' date" });
+      return;
+    }
+    if (to && isNaN(to.getTime())) {
+      res.status(400).json({ error: "bad_request", message: "Invalid 'to' date" });
+      return;
+    }
+
     const dateFilter: Record<string, unknown> = {};
     if (from) dateFilter.gte = from;
     if (to) dateFilter.lte = to;
