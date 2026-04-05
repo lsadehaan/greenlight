@@ -34,7 +34,7 @@ beforeEach(() => {
 });
 
 function mockPrisma(overrides: Record<string, unknown> = {}) {
-  return {
+  const base = {
     escalationConfig: {
       findMany: vi.fn().mockResolvedValue([]),
     },
@@ -48,7 +48,12 @@ function mockPrisma(overrides: Record<string, unknown> = {}) {
       findFirst: vi.fn().mockResolvedValue(null),
     },
     ...overrides,
-  } as unknown as Parameters<typeof checkEscalations>[0];
+  };
+  // $transaction executes the callback passing the prisma client itself
+  (base as Record<string, unknown>).$transaction = vi.fn().mockImplementation(
+    async (fn: (tx: typeof base) => Promise<unknown>) => fn(base),
+  );
+  return base as unknown as Parameters<typeof checkEscalations>[0];
 }
 
 const activeConfig = {

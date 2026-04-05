@@ -203,26 +203,32 @@ async function applyTimeoutAction(
   },
   webhookQueue: Queue<WebhookJobData>,
 ): Promise<void> {
-  // Check if already auto-decided (idempotency)
-  const current = await prisma.submission.findUnique({
-    where: { id: submission.id },
-    select: { status: true },
-  });
-  if (!current || current.status !== "pending") {
-    return;
-  }
-
   const decision = config.timeoutAction === "auto_approve" ? "approved" : "rejected";
   const now = new Date();
 
-  await prisma.submission.update({
-    where: { id: submission.id },
-    data: {
-      status: decision,
-      decidedAt: now,
-      decidedBy: "system",
-    },
+  // Atomic check-and-update to prevent race with concurrent human review
+  const updated = await prisma.$transaction(async (tx) => {
+    const current = await tx.submission.findUnique({
+      where: { id: submission.id },
+      select: { status: true },
+    });
+    if (!current || current.status !== "pending") {
+      return null;
+    }
+
+    return tx.submission.update({
+      where: { id: submission.id },
+      data: {
+        status: decision,
+        decidedAt: now,
+        decidedBy: "system",
+      },
+    });
   });
+
+  if (!updated) {
+    return;
+  }
 
   // Record audit event
   try {
