@@ -14,12 +14,15 @@ import { createFeedbackRouter } from "./routes/feedback.js";
 import { createAuditRouter } from "./routes/audit.js";
 import { createGuardrailRouter } from "./routes/guardrails.js";
 import { createWebhookQueue, createWebhookWorker } from "./workers/webhook.js";
+import { createAIReviewQueue, createAIReviewWorker } from "./workers/ai-review.js";
 
 const pool = new pg.Pool({ connectionString: config.databaseUrl });
 const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 const redis = new Redis(config.redisUrl, { maxRetriesPerRequest: 3 });
 const webhookQueue = createWebhookQueue(config.redisUrl);
+// Exported for use by tiered pipeline integration (issue #12)
+export const aiReviewQueue = createAIReviewQueue(config.redisUrl);
 
 const app = express();
 app.use(express.json());
@@ -44,6 +47,9 @@ app.use("/api/v1/guardrails", createGuardrailRouter(prisma));
 async function start(): Promise<void> {
   const worker = createWebhookWorker(prisma, config.redisUrl);
   console.log(`Webhook worker started (queue: ${worker.name})`);
+
+  const aiWorker = createAIReviewWorker(prisma, config.redisUrl, webhookQueue);
+  console.log(`AI review worker started (queue: ${aiWorker.name})`);
 
   app.listen(config.port, () => {
     console.log(`Greenlight API listening on port ${config.port}`);
